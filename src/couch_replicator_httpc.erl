@@ -10,11 +10,11 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(couch_api_wrap_httpc).
+-module(couch_replicator_httpc).
 
--include("couch_db.hrl").
--include("couch_api_wrap.hrl").
--include("../ibrowse/ibrowse.hrl").
+-include_lib("couch/include/couch_db.hrl").
+-include_lib("couch_replicator_api_wrap.hrl").
+-include_lib("ibrowse/include/ibrowse.hrl").
 
 -export([setup/1]).
 -export([send_req/3]).
@@ -30,7 +30,7 @@
 
 
 setup(#httpdb{httpc_pool = nil, url = Url, http_connections = MaxConns} = Db) ->
-    {ok, Pid} = couch_httpc_pool:start_link(Url, [{max_connections, MaxConns}]),
+    {ok, Pid} = couch_replicator_httpc_pool:start_link(Url, [{max_connections, MaxConns}]),
     {ok, Db#httpdb{httpc_pool = Pid}}.
 
 
@@ -54,7 +54,7 @@ send_ibrowse_req(#httpdb{headers = BaseHeaders} = HttpDb, Params) ->
     "_changes" ->
         {ok, Worker} = ibrowse:spawn_link_worker_process(Url);
     _ ->
-        {ok, Worker} = couch_httpc_pool:get_worker(HttpDb#httpdb.httpc_pool)
+        {ok, Worker} = couch_replicator_httpc_pool:get_worker(HttpDb#httpdb.httpc_pool)
     end,
     IbrowseOptions = [
         {response_format, binary}, {inactivity_timeout, HttpDb#httpdb.timeout} |
@@ -143,7 +143,7 @@ clean_mailbox_req(ReqId) ->
 
 
 release_worker(Worker, #httpdb{httpc_pool = Pool}) ->
-    ok = couch_httpc_pool:release_worker(Pool, Worker).
+    ok = couch_replicator_httpc_pool:release_worker(Pool, Worker).
 
 
 maybe_retry(Error, Worker, #httpdb{retries = 0} = HttpDb, Params, _Cb) ->
@@ -154,7 +154,7 @@ maybe_retry(Error, Worker, #httpdb{retries = Retries, wait = Wait} = HttpDb,
     release_worker(Worker, HttpDb),
     Method = string:to_upper(atom_to_list(get_value(method, Params, get))),
     Url = couch_util:url_strip_password(full_url(HttpDb, Params)),
-    ?LOG_INFO("Retrying ~s request to ~s in ~p seconds due to error ~s",
+    twig:log(notice,"Retrying ~s request to ~s in ~p seconds due to error ~s",
         [Method, Url, Wait / 1000, error_cause(Error)]),
     ok = timer:sleep(Wait),
     Wait2 = erlang:min(Wait * 2, ?MAX_WAIT),
@@ -170,11 +170,11 @@ report_error(Worker, HttpDb, Params, Error) ->
 
 
 do_report_error(Url, Method, {code, Code}) ->
-    ?LOG_ERROR("Replicator, request ~s to ~p failed. The received "
+    twig:log(error,"Replicator, request ~s to ~p failed. The received "
         "HTTP error code is ~p", [Method, Url, Code]);
 
 do_report_error(FullUrl, Method, Error) ->
-    ?LOG_ERROR("Replicator, request ~s to ~p failed due to error ~s",
+    twig:log(error,"Replicator, request ~s to ~p failed due to error ~s",
         [Method, FullUrl, error_cause(Error)]).
 
 

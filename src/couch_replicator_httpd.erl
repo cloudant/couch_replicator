@@ -10,9 +10,9 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(couch_httpd_replicator).
+-module(couch_replicator_httpd).
 
--include("couch_db.hrl").
+-include_lib("couch/include/couch_db.hrl").
 
 -import(couch_httpd, [
     send_json/2,

@@ -10,7 +10,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(couch_replication_notifier).
+-module(couch_replicator_notifier).
 
 -behaviour(gen_event).
 
@@ -21,11 +21,11 @@
 -export([init/1, terminate/2, code_change/3]).
 -export([handle_event/2, handle_call/2, handle_info/2]).
 
--include("couch_db.hrl").
+-include_lib("couch/include/couch_db.hrl").
 
 start_link(FunAcc) ->
     couch_event_sup:start_link(couch_replication,
-        {couch_replication_notifier, make_ref()}, FunAcc).
+        {couch_replicator_notifier, make_ref()}, FunAcc).
 
 notify(Event) ->
     gen_event:notify(couch_replication, Event).

@@ -10,11 +10,11 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(couch_rep_sup).
+-module(couch_replicator_job_sup).
 -behaviour(supervisor).
 -export([init/1, start_link/0]).
 
--include("couch_db.hrl").
+-include_lib("couch/include/couch_db.hrl").
 
 start_link() ->
     supervisor:start_link({local,?MODULE}, ?MODULE, []).

@@ -10,7 +10,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(couch_httpc_pool).
+-module(couch_replicator_httpc_pool).
 -behaviour(gen_server).
 
 % public API
@@ -21,11 +21,10 @@
 -export([init/1, handle_call/3, handle_info/2, handle_cast/2]).
 -export([code_change/3, terminate/2]).
 
--include("couch_db.hrl").
+-include_lib("couch/include/couch_db.hrl").
 
 -import(couch_util, [
-    get_value/2,
-    get_value/3
+    get_value/2
 ]).
 
 -record(state, {
