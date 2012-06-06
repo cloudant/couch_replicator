@@ -1,7 +1,7 @@
-{application, replicator, [
+{application, couch_replicator, [
     {description, "CouchDB replicator"},
     {vsn, git},
-    {mod, {replicator_app, []}},
+    {mod, {couch_replicator_app, []}},
     {registered, [
         couch_replicator,
         couch_replicator_manager,
