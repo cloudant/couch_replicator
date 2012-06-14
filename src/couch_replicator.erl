@@ -245,11 +245,7 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
     #rep_state{
         source = Source,
         target = Target,
-        source_name = SourceName,
-        target_name = TargetName,
-        start_seq = {_Ts, StartSeq},
-        source_seq = SourceCurSeq,
-        committed_seq = {_, CommittedSeq}
+        start_seq = {_Ts, StartSeq}
     } = State = init_state(Rep),
 
     NumWorkers = get_value(worker_processes, Options),
@@ -275,24 +271,6 @@ do_init(#rep{options = Options, id = {BaseId, Ext}} = Rep) ->
             Pid
         end,
         lists:seq(1, NumWorkers)),
-
-    couch_task_status:add_task([
-        {type, replication},
-        {replication_id, ?l2b(BaseId ++ Ext)},
-        {doc_id, Rep#rep.doc_id},
-        {source, ?l2b(SourceName)},
-        {target, ?l2b(TargetName)},
-        {continuous, get_value(continuous, Options, false)},
-        {revisions_checked, 0},
-        {missing_revisions_found, 0},
-        {docs_read, 0},
-        {docs_written, 0},
-        {doc_write_failures, 0},
-        {source_seq, SourceCurSeq},
-        {checkpointed_source_seq, CommittedSeq},
-        {progress, 0}
-    ]),
-    couch_task_status:set_update_frequency(1000),
 
     % Until OTP R14B03:
     %
@@ -918,28 +896,8 @@ source_cur_seq(#rep_state{source = Db, source_seq = Seq}) ->
     {ok, Info} = couch_replicator_api_wrap:get_db_info(Db),
     get_value(<<"update_seq">>, Info, Seq).
 
-
-update_task(State) ->
-    #rep_state{
-        current_through_seq = {_, CurSeq},
-        source_seq = SourceCurSeq
-    } = State,
-    couch_task_status:update(
-        rep_stats(State) ++ [
-        {source_seq, SourceCurSeq},
-        case is_number(CurSeq) andalso is_number(SourceCurSeq) of
-        true ->
-            case SourceCurSeq of
-            0 ->
-                {progress, 0};
-            _ ->
-                {progress, (CurSeq * 100) div SourceCurSeq}
-            end;
-        false ->
-            {progress, null}
-        end
-    ]).
-
+update_task(_) ->
+    ok.
 
 rep_stats(State) ->
     #rep_state{
