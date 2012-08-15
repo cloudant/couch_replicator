@@ -1,4 +1,4 @@
 *.beam
 .eunit
-ebin/replicator.app
+ebin
 .DS_Store
