@@ -432,6 +432,8 @@ handle_cast({report_seq, Seq},
     {noreply, State#rep_state{seqs_in_progress = NewSeqsInProgress}}.
 
 
+code_change(_OldVsn, OldState, _Extra) when tuple_size(OldState) =:= 30 ->
+    {ok, erlang:append_element(OldState, true)};
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
