@@ -259,7 +259,7 @@ changes_feed_loop(DbName, Since) ->
             nil,
             #changes_args{
                 include_docs = true,
-                feed = "normal",
+                feed = "longpoll",
                 since = Since,
                 filter = main_only,
                 timeout = infinity
@@ -284,6 +284,13 @@ db_update_notifier() ->
             case IsReplicatorDbFun(DbName) of
             true ->
                 ok = gen_server:call(Server, {resume_scan, mem3:dbname(DbName)});
+            _ ->
+                ok
+            end;
+           ({deleted, DbName}) ->
+            case IsReplicatorDbFun(DbName) of
+            true ->
+                ets:delete(?DB_TO_SEQ,DbName);
             _ ->
                 ok
             end;
