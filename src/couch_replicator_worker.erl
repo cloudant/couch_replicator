@@ -140,6 +140,8 @@ handle_call(flush, {Pid, _} = From,
     end,
     {noreply, State2#state{flush_waiter = From}}.
 
+handle_call(max_conns, _From, #state{max_parallel_conns=Max}=State) ->
+    {reply, Max, State}.
 
 handle_cast({db_compacted, DbName},
     #state{source = #db{name = DbName} = Source} = State) ->

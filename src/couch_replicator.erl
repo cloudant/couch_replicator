@@ -369,6 +369,10 @@ handle_info({'EXIT', Pid, normal}, #rep_state{workers = Workers} = State) ->
         {noreply, State#rep_state{workers = Workers2}}
     end;
 
+handle_info({'EXIT', _Pid, killed}, State) ->
+    %% this was a worker process killed by a reset
+    {noreply, State};
+
 handle_info({'EXIT', Pid, Reason}, #rep_state{workers = Workers} = State) ->
     State2 = cancel_timer(State),
     case lists:member(Pid, Workers) of
@@ -453,6 +457,30 @@ handle_cast({report_seq, Seq},
     NewSeqsInProgress = ordsets:add_element(Seq, SeqsInProgress),
     {noreply, State#rep_state{seqs_in_progress = NewSeqsInProgress}}.
 
+handle_cast(reset_workers, State) ->
+    #rep_state{rep_details = Rep,
+               changes_manager = ChangesManager,
+               workers = Workers} = State,
+    #rep{source = Src,
+         target = Tgt,
+         user_ctx = UserCtx} = Rep,
+
+    {ok, NewSource} = couch_replicator_api_wrap:db_open(Src, [{user_ctx, UserCtx}]),
+    {ok, NewTarget} = couch_replicator_api_wrap:db_open(Tgt, [{user_ctx, UserCtx}]),
+
+    NewWorkers =
+        lists:map(
+        fun(Worker) ->
+            MaxConns = gen_server:call(Worker, max_conns),
+            catch exit(Worker, kill),
+            {ok, Pid} = couch_replicator_worker:start_link(
+                self(), NewSource, NewTarget, ChangesManager, MaxConns),
+            Pid
+        end,
+        Workers),
+    {noreply, State#rep_state{source = NewSource,
+                              target = NewTarget,
+                              workers=NewWorkers}}.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -679,6 +707,9 @@ changes_manager_loop_open(Parent, ChangesQueue, BatchSize, Ts) ->
             From ! {changes, self(), Changes, ReportSeq}
         end,
         changes_manager_loop_open(Parent, ChangesQueue, BatchSize, Ts + 1)
+    after 10000 ->
+        ok = gen_server:cast(Parent, reset_workers),
+        changes_manager_loop_open(Parent, ChangesQueue, BatchSize, Ts)
     end.
 
 
