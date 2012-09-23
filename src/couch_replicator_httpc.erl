@@ -90,6 +90,9 @@ process_response({ok, Code, Headers, Body}, Worker, HttpDb, Params, Callback) ->
         Callback(Ok, Headers, EJson);
     R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
         do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
+    Again when Again =:= 500 ->
+            release_worker(Worker, HttpDb),
+            throw(retry);
     Error ->
         maybe_retry({code, Error}, Worker, HttpDb, Params, Callback)
     end;

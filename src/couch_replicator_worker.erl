@@ -288,8 +288,19 @@ spawn_doc_reader(Source, Target, FetchParams) ->
     Parent = self(),
     spawn_link(fun() ->
         Source2 = open_db(Source),
-        fetch_doc(
-            Source2, FetchParams, fun remote_doc_handler/2, {Parent, Target}),
+        try
+            fetch_doc(Source2, FetchParams, fun remote_doc_handler/2, {Parent, Target})
+        catch
+        throw:retry ->
+            io:format("once more try with feeling ~n",[]),
+            try
+                fetch_doc(Source2, FetchParams, fun remote_doc_handler/2, {Parent, Target})
+            catch
+            throw:retry ->
+                io:format("can't try forever, I'm done ~n",[]),
+                ok
+            end
+        end,
         close_db(Source2)
     end).
 
@@ -482,7 +493,12 @@ flush_doc(Target, #doc{id = Id, revs = {Pos, [RevId | _]}} = Doc) ->
             " to target database `~s`. Error: `~s`.",
             [Id, couch_doc:rev_to_str({Pos, RevId}),
                 couch_replicator_api_wrap:db_uri(Target), to_binary(Err)]),
-        {error, Err}
+        case Err of
+        retry ->
+            throw(Err);
+        _ ->
+            {error, Err}
+        end
     end.
 
 
