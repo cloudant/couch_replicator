@@ -26,8 +26,8 @@
     db_open/3,
     db_close/1,
     get_db_info/1,
-    update_doc/3,
     update_doc/4,
+    update_doc/5,
     update_docs/3,
     update_docs/4,
     ensure_full_commit/1,
@@ -39,7 +39,8 @@
     ]).
 
 -import(couch_replicator_httpc, [
-    send_req/3
+    send_req/3,
+    send_req/4
     ]).
 
 -import(couch_util, [
@@ -172,7 +173,7 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
                         get_value("Content-Type", Headers),
                         StreamDataFun,
                         fun mp_parse_mixed/1)
-                end),
+                end, true),
             unlink(Self)
         end),
     receive
@@ -202,10 +203,10 @@ open_doc(Db, Id, Options) ->
     end.
 
 
-update_doc(Db, Doc, Options) ->
-    update_doc(Db, Doc, Options, interactive_edit).
+update_doc(Db, Doc, Options, RetryLocally) ->
+    update_doc(Db, Doc, Options, interactive_edit, RetryLocally).
 
-update_doc(#httpdb{} = HttpDb, #doc{id = DocId} = Doc, Options, Type) ->
+update_doc(HttpDb, #doc{id = DocId} = Doc, Options, Type, RetryLocally) ->
     QArgs = case Type of
     replicated_changes ->
         [{"new_edits", "false"}];
@@ -244,8 +245,8 @@ update_doc(#httpdb{} = HttpDb, #doc{id = DocId} = Doc, Options, Type) ->
                 {_, Error} ->
                     {error, Error}
                 end
-        end);
-update_doc(Db, Doc, Options, Type) ->
+        end, RetryLocally);
+update_doc(Db, Doc, Options, Type, _RetryLocally) ->
     couch_db:update_doc(Db, Doc, Options, Type).
 
 

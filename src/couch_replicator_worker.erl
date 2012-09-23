@@ -286,11 +286,17 @@ spawn_doc_reader(Source, Target, FetchParams) ->
     Parent = self(),
     spawn_link(fun() ->
         Source2 = open_db(Source),
-        fetch_doc(
-            Source2, FetchParams, fun remote_doc_handler/2, {Parent, Target}),
+        try_work(Source, FetchParams, fun remote_doc_handler/2, {Parent, Target}),
         close_db(Source2)
     end).
 
+try_work(Source, FetchParams, DocHandler, {Parent, Target}) ->
+    try
+        fetch_doc(Source, FetchParams, DocHandler, {Parent, Target})
+    catch
+    throw:{retry, Times, Wait} ->
+        try_work(Source, FetchParams, fun remote_doc_handler/2, {Parent, Target#httpdb{retries = Times, wait = Wait}})
+    end.
 
 fetch_doc(Source, {Id, Revs, PAs}, DocHandler, Acc) ->
     try
@@ -459,7 +465,7 @@ flush_docs(Target, DocList) ->
     }.
 
 flush_doc(Target, #doc{id = Id, revs = {Pos, [RevId | _]}} = Doc) ->
-    try couch_replicator_api_wrap:update_doc(Target, Doc, [], replicated_changes) of
+    try couch_replicator_api_wrap:update_doc(Target, Doc, [], replicated_changes, false) of
     {ok, _} ->
         ok;
     Error ->
@@ -480,7 +486,12 @@ flush_doc(Target, #doc{id = Id, revs = {Pos, [RevId | _]}} = Doc) ->
             " to target database `~s`. Error: `~s`.",
             [Id, couch_doc:rev_to_str({Pos, RevId}),
                 couch_replicator_api_wrap:db_uri(Target), to_binary(Err)]),
-        {error, Err}
+        case Err of
+        {retry, _, _} ->
+            throw(Err);
+        _ ->
+            {error, Err}
+        end
     end.
 
 
