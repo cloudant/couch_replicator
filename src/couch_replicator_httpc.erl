@@ -80,7 +80,7 @@ process_response({ibrowse_req_id, ReqId}, Worker, HttpDb, Params, Callback) ->
 process_response({ok, Code, Headers, Body}, Worker, HttpDb, Params, Callback) ->
     release_worker(Worker, HttpDb),
     case list_to_integer(Code) of
-    Ok when Ok =:= 200 ; Ok =:= 201 ; (Ok >= 400 andalso Ok < 500) ->
+    Ok when (Ok >= 200 andalso Ok < 300) ; (Ok >= 400 andalso Ok < 500) ->
         EJson = case Body of
         <<>> ->
             null;
