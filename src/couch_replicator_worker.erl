@@ -408,13 +408,19 @@ maybe_flush_docs(#httpdb{} = Target, Batch, Doc) ->
         end;
     true ->
         JsonDoc = ?JSON_ENCODE(couch_doc:to_json_obj(Doc, [revs, attachments])),
-        case SizeAcc + iolist_size(JsonDoc) of
-        SizeAcc2 when SizeAcc2 > ?DOC_BUFFER_BYTE_SIZE ->
-            twig:log(debug,"Worker flushing doc batch of size ~p bytes", [SizeAcc2]),
-            Stats = flush_docs(Target, [JsonDoc | DocAcc]),
-            {#batch{}, Stats};
-        SizeAcc2 ->
-            {#batch{docs = [JsonDoc | DocAcc], size = SizeAcc2}, #rep_stats{}}
+        case lists:member(JsonDoc, DocAcc) of
+        true ->
+            twig:log(warning,"This doc has already been batched ~p ~p ~n",[Doc, DocAcc]),
+            {#batch{docs = DocAcc, size = SizeAcc}, #rep_stats{}};
+        false ->
+            case SizeAcc + iolist_size(JsonDoc) of
+            SizeAcc2 when SizeAcc2 > ?DOC_BUFFER_BYTE_SIZE ->
+                twig:log(debug,"Worker flushing doc batch of size ~p bytes", [SizeAcc2]),
+                Stats = flush_docs(Target, [JsonDoc | DocAcc]),
+                {#batch{}, Stats};
+            SizeAcc2 ->
+                {#batch{docs = [JsonDoc | DocAcc], size = SizeAcc2}, #rep_stats{}}
+            end
         end
     end;
 
