@@ -271,7 +271,7 @@ changes_feed_loop(DbName, Since) ->
 
 
 has_valid_rep_id({Change}) ->
-    has_valid_rep_id(get_value(<<"id">>, Change));
+    has_valid_rep_id(get_value(<<"id">>, Change, get_value(id, Change)));
 has_valid_rep_id(<<?DESIGN_DOC_PREFIX, _Rest/binary>>) ->
     false;
 has_valid_rep_id(_Else) ->
