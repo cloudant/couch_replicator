@@ -17,7 +17,7 @@
 -include_lib("ibrowse/include/ibrowse.hrl").
 
 -export([setup/1]).
--export([send_req/3]).
+-export([send_req/3, send_req/4]).
 -export([full_url/2]).
 
 -import(couch_util, [
@@ -35,12 +35,15 @@ setup(#httpdb{httpc_pool = nil, url = Url, http_connections = MaxConns} = Db) ->
 
 
 send_req(HttpDb, Params1, Callback) ->
+    send_req(HttpDb, Params1, Callback, true).
+
+send_req(HttpDb, Params1, Callback, RetryLocally) ->
     Params2 = ?replace(Params1, qs,
         [{K, ?b2l(iolist_to_binary(V))} || {K, V} <- get_value(qs, Params1, [])]),
     Params = ?replace(Params2, ibrowse_options,
         lists:keysort(1, get_value(ibrowse_options, Params2, []))),
     {Worker, Response} = send_ibrowse_req(HttpDb, Params),
-    process_response(Response, Worker, HttpDb, Params, Callback).
+    process_response(Response, Worker, HttpDb, Params, Callback, RetryLocally).
 
 
 send_ibrowse_req(#httpdb{headers = BaseHeaders} = HttpDb, Params) ->
@@ -66,18 +69,18 @@ send_ibrowse_req(#httpdb{headers = BaseHeaders} = HttpDb, Params) ->
     {Worker, Response}.
 
 
-process_response({error, sel_conn_closed}, _Worker, HttpDb, Params, Callback) ->
-    send_req(HttpDb, Params, Callback);
+process_response({error, sel_conn_closed}, _Worker, HttpDb, Params, Callback, RetryLocally) ->
+    send_req(HttpDb, Params, Callback, RetryLocally);
 
-process_response({error, {'EXIT', {normal, _}}}, _Worker, HttpDb, Params, Cb) ->
+process_response({error, {'EXIT', {normal, _}}}, _Worker, HttpDb, Params, Cb, RetryLocally) ->
     % ibrowse worker terminated because remote peer closed the socket
     % -> not an error
-    send_req(HttpDb, Params, Cb);
+    send_req(HttpDb, Params, Cb, RetryLocally);
 
-process_response({ibrowse_req_id, ReqId}, Worker, HttpDb, Params, Callback) ->
-    process_stream_response(ReqId, Worker, HttpDb, Params, Callback);
+process_response({ibrowse_req_id, ReqId}, Worker, HttpDb, Params, Callback, RetryLocally) ->
+    process_stream_response(ReqId, Worker, HttpDb, Params, Callback, RetryLocally);
 
-process_response({ok, Code, Headers, Body}, Worker, HttpDb, Params, Callback) ->
+process_response({ok, Code, Headers, Body}, Worker, HttpDb, Params, Callback, RetryLocally) ->
     release_worker(Worker, HttpDb),
     case list_to_integer(Code) of
     Ok when (Ok >= 200 andalso Ok < 300) ; (Ok >= 400 andalso Ok < 500) ->
@@ -89,16 +92,16 @@ process_response({ok, Code, Headers, Body}, Worker, HttpDb, Params, Callback) ->
         end,
         Callback(Ok, Headers, EJson);
     R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
-        do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
+        do_redirect(Worker, R, Headers, HttpDb, Params, Callback, RetryLocally);
     Error ->
-        maybe_retry({code, Error}, Worker, HttpDb, Params, Callback)
+        maybe_retry({code, Error}, Worker, HttpDb, Params, Callback, RetryLocally)
     end;
 
-process_response(Error, Worker, HttpDb, Params, Callback) ->
-    maybe_retry(Error, Worker, HttpDb, Params, Callback).
+process_response(Error, Worker, HttpDb, Params, Callback, RetryLocally) ->
+    maybe_retry(Error, Worker, HttpDb, Params, Callback, RetryLocally).
 
 
-process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
+process_stream_response(ReqId, Worker, HttpDb, Params, Callback, RetryLocally) ->
     receive
     {ibrowse_async_headers, ReqId, Code, Headers} ->
         case list_to_integer(Code) of
@@ -114,20 +117,20 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
                 Ret
             catch throw:{maybe_retry_req, Err} ->
                 clean_mailbox_req(ReqId),
-                maybe_retry(Err, Worker, HttpDb, Params, Callback)
+                maybe_retry(Err, Worker, HttpDb, Params, Callback, RetryLocally)
             end;
         R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
-            do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
+            do_redirect(Worker, R, Headers, HttpDb, Params, Callback, RetryLocally);
         Error ->
             report_error(Worker, HttpDb, Params, {code, Error})
         end;
     {ibrowse_async_response, ReqId, {error, _} = Error} ->
-        maybe_retry(Error, Worker, HttpDb, Params, Callback)
+        maybe_retry(Error, Worker, HttpDb, Params, Callback, RetryLocally)
     after HttpDb#httpdb.timeout + 500 ->
         % Note: ibrowse should always reply with timeouts, but this doesn't
         % seem to be always true when there's a very high rate of requests
         % and many open connections.
-        maybe_retry(timeout, Worker, HttpDb, Params, Callback)
+        maybe_retry(timeout, Worker, HttpDb, Params, Callback, RetryLocally)
     end.
 
 
@@ -146,11 +149,11 @@ release_worker(Worker, #httpdb{httpc_pool = Pool}) ->
     ok = couch_replicator_httpc_pool:release_worker(Pool, Worker).
 
 
-maybe_retry(Error, Worker, #httpdb{retries = 0} = HttpDb, Params, _Cb) ->
+maybe_retry(Error, Worker, #httpdb{retries = 0} = HttpDb, Params, _Cb, _RetryLocally) ->
     report_error(Worker, HttpDb, Params, {error, Error});
 
 maybe_retry(Error, Worker, #httpdb{retries = Retries, wait = Wait} = HttpDb,
-    Params, Cb) ->
+    Params, Cb, RetryLocally) ->
     release_worker(Worker, HttpDb),
     Method = string:to_upper(atom_to_list(get_value(method, Params, get))),
     Url = couch_util:url_strip_password(full_url(HttpDb, Params)),
@@ -158,7 +161,12 @@ maybe_retry(Error, Worker, #httpdb{retries = Retries, wait = Wait} = HttpDb,
         [Method, Url, Wait / 1000, error_cause(Error)]),
     ok = timer:sleep(Wait),
     Wait2 = erlang:min(Wait * 2, ?MAX_WAIT),
-    send_req(HttpDb#httpdb{retries = Retries - 1, wait = Wait2}, Params, Cb).
+    case RetryLocally of
+    true ->
+        send_req(HttpDb#httpdb{retries = Retries - 1, wait = Wait2}, Params, Cb, RetryLocally);
+    false ->
+        throw({retry, Retries - 1, Wait2})
+    end.
 
 
 report_error(Worker, HttpDb, Params, Error) ->
@@ -251,11 +259,11 @@ oauth_header(#httpdb{url = BaseUrl, oauth = OAuth}, ConnParams) ->
         "OAuth " ++ oauth_uri:params_to_header_string(OAuthParams)}].
 
 
-do_redirect(Worker, Code, Headers, #httpdb{url = Url} = HttpDb, Params, Cb) ->
+do_redirect(Worker, Code, Headers, #httpdb{url = Url} = HttpDb, Params, Cb, RetryLocally) ->
     release_worker(Worker, HttpDb),
     RedirectUrl = redirect_url(Headers, Url),
     {HttpDb2, Params2} = after_redirect(RedirectUrl, Code, HttpDb, Params),
-    send_req(HttpDb2, Params2, Cb).
+    send_req(HttpDb2, Params2, Cb, RetryLocally).
 
 
 redirect_url(RespHeaders, OrigUrl) ->

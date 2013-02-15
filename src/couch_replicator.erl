@@ -807,7 +807,7 @@ update_checkpoint(Db, Doc, DbType) ->
 
 update_checkpoint(Db, #doc{id = LogId, body = LogBody} = Doc) ->
     try
-        case couch_replicator_api_wrap:update_doc(Db, Doc, [delay_commit]) of
+        case couch_replicator_api_wrap:update_doc(Db, Doc, [delay_commit], true) of
         {ok, PosRevId} ->
             PosRevId;
         {error, Reason} ->
