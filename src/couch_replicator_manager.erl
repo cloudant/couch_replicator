@@ -117,9 +117,9 @@ handle_config_change(_, _, _, _, S) ->
 init(_) ->
     process_flag(trap_exit, true),
     net_kernel:monitor_nodes(true),
-    ?DOC_TO_REP = ets:new(?DOC_TO_REP, [named_table, set, protected]),
-    ?REP_TO_STATE = ets:new(?REP_TO_STATE, [named_table, set, protected]),
-    ?DB_TO_SEQ = ets:new(?DB_TO_SEQ, [named_table, set, protected]),
+    ?DOC_TO_REP = ets:new(?DOC_TO_REP, [named_table, set, public]),
+    ?REP_TO_STATE = ets:new(?REP_TO_STATE, [named_table, set, public]),
+    ?DB_TO_SEQ = ets:new(?DB_TO_SEQ, [named_table, set, public]),
     Server = self(),
     ok = config:listen_for_changes(?MODULE, Server),
     ScanPid = spawn_link(fun() -> scan_all_dbs(Server) end),
@@ -267,7 +267,7 @@ changes_feed_loop(DbName, Since) ->
                 end,
                 {ok, Acc};
             ({stop, EndSeq}, Acc) ->
-                ok = gen_server:call(Server, {rep_db_checkpoint, DbName, EndSeq}),
+                ok = gen_server:call(Server, {rep_db_checkpoint, DbName, EndSeq}, infinity),
                 {ok, Acc};
             (_, Acc) ->
                 {ok, Acc}
@@ -299,14 +299,14 @@ db_update_notifier() ->
         fun({updated, DbName}) ->
             case IsReplicatorDbFun(DbName) of
             true ->
-                ok = gen_server:call(Server, {resume_scan, mem3:dbname(DbName)});
+                ok = gen_server:call(Server, {resume_scan, mem3:dbname(DbName)}, infinity);
             _ ->
                 ok
             end;
            ({deleted, DbName}) ->
             case IsReplicatorDbFun(DbName) of
             true ->
-                ets:delete(?DB_TO_SEQ,DbName);
+                clean_up_replications(mem3:dbname(DbName));
             _ ->
                 ok
             end;
@@ -331,10 +331,10 @@ process_update(State, DbName, {Change}) ->
     DocId = get_value(<<"_id">>, RepProps),
     case {mem3_util:owner(DbName, DocId), get_value(deleted, Change, false)} of
     {false, _} ->
-        replication_complete(DocId),
+        replication_complete(DbName, DocId),
         State;
     {true, true} ->
-        rep_doc_deleted(DocId),
+        rep_doc_deleted(DbName, DocId),
         State;
     {true, false} ->
         case get_value(<<"_replication_state">>, RepProps) of
@@ -343,10 +343,10 @@ process_update(State, DbName, {Change}) ->
         <<"triggered">> ->
             maybe_start_replication(State, DbName, DocId, JsonRepDoc);
         <<"completed">> ->
-            replication_complete(DocId),
+            replication_complete(DbName, DocId),
             State;
         <<"error">> ->
-            case ets:lookup(?DOC_TO_REP, DocId) of
+            case ets:lookup(?DOC_TO_REP, {DbName, DocId}) of
             [] ->
                 maybe_start_replication(State, DbName, DocId, JsonRepDoc);
             _ ->
@@ -391,7 +391,7 @@ maybe_start_replication(State, DbName, DocId, RepDoc) ->
             max_retries = State#state.max_retries
         },
         true = ets:insert(?REP_TO_STATE, {RepId, RepState}),
-        true = ets:insert(?DOC_TO_REP, {DocId, RepId}),
+        true = ets:insert(?DOC_TO_REP, {{DbName, DocId}, RepId}),
         twig:log(notice,"Attempting to start replication `~s` (document `~s`).",
             [pp_rep_id(RepId), DocId]),
         Pid = spawn_link(fun() -> start_replication(Rep, 0) end),
@@ -441,9 +441,9 @@ start_replication(Rep, Wait) ->
         replication_error(Rep, Error)
     end.
 
-replication_complete(DocId) ->
-    case ets:lookup(?DOC_TO_REP, DocId) of
-    [{DocId, {BaseId, Ext} = RepId}] ->
+replication_complete(DbName, DocId) ->
+    case ets:lookup(?DOC_TO_REP, {DbName, DocId}) of
+    [{{DbName, DocId}, {BaseId, Ext} = RepId}] ->
         case rep_state(RepId) of
         nil ->
             % Prior to OTP R14B02, temporary child specs remain in
@@ -455,18 +455,18 @@ replication_complete(DocId) ->
         #rep_state{} ->
             ok
         end,
-        true = ets:delete(?DOC_TO_REP, DocId);
+        true = ets:delete(?DOC_TO_REP, {DbName, DocId});
     _ ->
         ok
     end.
 
 
-rep_doc_deleted(DocId) ->
-    case ets:lookup(?DOC_TO_REP, DocId) of
-    [{DocId, RepId}] ->
+rep_doc_deleted(DbName, DocId) ->
+    case ets:lookup(?DOC_TO_REP, {DbName, DocId}) of
+    [{{DbName, DocId}, RepId}] ->
         couch_replicator:cancel_replication(RepId),
         true = ets:delete(?REP_TO_STATE, RepId),
-        true = ets:delete(?DOC_TO_REP, DocId),
+        true = ets:delete(?DOC_TO_REP, {DbName, DocId}),
         twig:log(notice, "Stopped replication `~s` because replication document `~s`"
             " was deleted", [pp_rep_id(RepId), DocId]);
     [] ->
@@ -484,12 +484,13 @@ replication_error(State, RepId, Error) ->
 
 maybe_retry_replication(#rep_state{retries_left = 0} = RepState, Error, State) ->
     #rep_state{
+        dbname = DbName,
         rep = #rep{id = RepId, doc_id = DocId},
         max_retries = MaxRetries
     } = RepState,
     couch_replicator:cancel_replication(RepId),
     true = ets:delete(?REP_TO_STATE, RepId),
-    true = ets:delete(?DOC_TO_REP, DocId),
+    true = ets:delete(?DOC_TO_REP, {DbName, DocId}),
     twig:log(error, "Error in replication `~s` (triggered by document `~s`): ~s"
         "~nReached maximum retry attempts (~p).",
         [pp_rep_id(RepId), DocId, to_binary(error_reason(Error)), MaxRetries]),
@@ -519,6 +520,18 @@ stop_all_replications() ->
     true = ets:delete_all_objects(?REP_TO_STATE),
     true = ets:delete_all_objects(?DOC_TO_REP),
     true = ets:delete_all_objects(?DB_TO_SEQ).
+
+clean_up_replications(DbName) ->
+    ets:foldl(
+        fun({{Name, DocId}, RepId}, _) when Name =:= DbName ->
+            couch_replicator:cancel_replication(RepId),
+            ets:delete(?DOC_TO_REP,{Name, DocId}),
+            ets:delete(?REP_TO_STATE, RepId);
+           ({_,_}, _) ->
+            ok
+        end,
+        ok, ?DOC_TO_REP),
+    ets:delete(?DB_TO_SEQ,DbName).
 
 
 update_rep_doc(RepDbName, RepDocId, KVs) when is_binary(RepDocId) ->
