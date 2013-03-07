@@ -166,6 +166,7 @@ handle_call({rep_complete, RepId}, _From, State) ->
 handle_call({rep_error, RepId, Error}, _From, State) ->
     {reply, ok, replication_error(State, RepId, Error)};
 
+% Old endpoint, remove later - APK
 handle_call({resume_scan, DbName}, _From, State) ->
     Since = case ets:lookup(?DB_TO_SEQ, DbName) of
         [] -> 0;
@@ -183,6 +184,15 @@ handle_call(Msg, From, State) ->
     twig:log(error, "Replication manager received unexpected call ~p from ~p",
         [Msg, From]),
     {stop, {error, {unexpected_call, Msg}}, State}.
+
+handle_cast({resume_scan, DbName}, State) ->
+    Since = case ets:lookup(?DB_TO_SEQ, DbName) of
+        [] -> 0;
+        [{DbName, EndSeq}] -> EndSeq
+    end,
+    Pid = changes_feed_loop(DbName, Since),
+    twig:log(debug, "Scanning ~s from update_seq ~p", [DbName, Since]),
+    {noreply, State#state{rep_start_pids = [Pid | State#state.rep_start_pids]}};
 
 handle_cast({set_max_retries, MaxRetries}, State) ->
     {noreply, State#state{max_retries = MaxRetries}};
@@ -299,7 +309,7 @@ db_update_notifier() ->
         fun({updated, DbName}) ->
             case IsReplicatorDbFun(DbName) of
             true ->
-                ok = gen_server:call(Server, {resume_scan, mem3:dbname(DbName)}, infinity);
+                ok = gen_server:cast(Server, {resume_scan, mem3:dbname(DbName)}, infinity);
             _ ->
                 ok
             end;
@@ -661,7 +671,7 @@ scan_all_dbs(Server) when is_pid(Server) ->
                 ok;
             false ->
                 IsReplicatorDbFun(DbName) andalso
-                gen_server:call(Server, {resume_scan, DbName})
+                gen_server:cast(Server, {resume_scan, DbName})
             end
         end;
         (_, _) -> ok
