@@ -361,7 +361,9 @@ changes_since(#httpdb{headers = Headers1, timeout = InactiveTimeout} = HttpDb,
                                 UserFun(DocInfo);
                             false ->
                                 ok
-                            end
+                            end;
+                        (LastSeq) ->
+                            UserFun(LastSeq)
                         end,
                         parse_changes_feed(Options, UserFun2, DataStreamFun2)
                     end)
