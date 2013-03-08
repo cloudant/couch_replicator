@@ -309,7 +309,7 @@ db_update_notifier() ->
         fun({updated, DbName}) ->
             case IsReplicatorDbFun(DbName) of
             true ->
-                ok = gen_server:cast(Server, {resume_scan, mem3:dbname(DbName)}, infinity);
+                ok = gen_server:cast(Server, {resume_scan, mem3:dbname(DbName)});
             _ ->
                 ok
             end;
