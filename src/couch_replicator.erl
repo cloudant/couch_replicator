@@ -402,6 +402,8 @@ handle_call({report_seq_done, Seq, StatsInc}, From,
         current_through_seq = ThroughSeq, stats = Stats} = State) ->
     gen_server:reply(From, ok),
     {NewThroughSeq0, NewSeqsInProgress} = case SeqsInProgress of
+    [] ->
+        {Seq, []};
     [Seq | Rest] ->
         {Seq, Rest};
     [_ | _] ->
@@ -614,17 +616,19 @@ fold_replication_logs([Db | Rest] = Dbs, Vsn, LogId, NewId, Rep, Acc) ->
 
 
 spawn_changes_reader(StartSeq, #httpdb{} = Db, ChangesQueue, Options) ->
+    Parent = self(),
     spawn_link(fun() ->
         put(last_seq, StartSeq),
         put(retries_left, Db#httpdb.retries),
-        read_changes(StartSeq, Db#httpdb{retries = 0}, ChangesQueue, Options)
+        read_changes(Parent, StartSeq, Db#httpdb{retries = 0}, ChangesQueue, Options, 1)
     end);
 spawn_changes_reader(StartSeq, Db, ChangesQueue, Options) ->
+    Parent = self(),
     spawn_link(fun() ->
-        read_changes(StartSeq, Db, ChangesQueue, Options)
+        read_changes(Parent, StartSeq, Db, ChangesQueue, Options, 1)
     end).
 
-read_changes(StartSeq, Db, ChangesQueue, Options) ->
+read_changes(Parent, StartSeq, Db, ChangesQueue, Options, Ts) ->
     try
         couch_replicator_api_wrap:changes_since(Db, all_docs, StartSeq,
             fun(#doc_info{high_seq = Seq, id = Id} = DocInfo) ->
@@ -646,7 +650,9 @@ read_changes(StartSeq, Db, ChangesQueue, Options) ->
                     % LS should never be undefined, but it doesn't hurt to be
                     % defensive inside the replicator.
                     Seq = case LS of undefined -> get(last_seq); _ -> LS end,
-                    read_changes(Seq, Db, ChangesQueue, Options);
+                    ok = gen_server:call(Parent, {report_seq_done, {Ts, Seq}, #rep_stats{}}, infinity),
+                    put(last_seq, Seq),
+                    read_changes(Parent, Seq, Db, ChangesQueue, Options, Ts + 1);
                 _ ->
                     % This clause is unreachable today, but let's plan ahead
                     % for the future where we checkpoint against last_seq
@@ -673,7 +679,7 @@ read_changes(StartSeq, Db, ChangesQueue, Options) ->
                     " with since=~p", [couch_replicator_api_wrap:db_uri(Db), LastSeq]),
                 Db
             end,
-            read_changes(LastSeq, Db2, ChangesQueue, Options);
+            read_changes(Parent, LastSeq, Db2, ChangesQueue, Options, Ts);
         _ ->
             exit(Error)
         end
