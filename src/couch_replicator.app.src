@@ -7,6 +7,6 @@
         couch_replicator_manager,
         couch_replicator_job_sup
     ]},
-    {applications, [kernel, stdlib, twig, fabric, mem3, couch]}
+    {applications, [kernel, stdlib, twig, fabric, mem3, couch_event, couch]}
 ]}.
 
