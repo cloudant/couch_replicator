@@ -437,7 +437,7 @@ parse_rep_doc(RepDoc) ->
 
 duplicated_rep_doc(DbName, DocId, {RepProps}, RepId, OtherDocId) ->
     OldRepId = get_value(<<"_replication_id">>, RepProps),
-    OldState = get_value(<<"_replicaiton_state">>, RepProps),
+    OldState = get_value(<<"_replication_state">>, RepProps),
     OldStats = get_value(<<"_replication_stats">>, RepProps),
     case {OldRepId, OldState, OldStats} of
     {RepId, <<"duplicate">>, {[{<<"original_docid">>, OtherDocId}]}} ->
