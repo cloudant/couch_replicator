@@ -352,6 +352,8 @@ process_update(State, DbName, {Change}) ->
             maybe_start_replication(State, DbName, DocId, JsonRepDoc);
         <<"triggered">> ->
             maybe_start_replication(State, DbName, DocId, JsonRepDoc);
+        <<"duplicate">> ->
+            maybe_start_replication(State, DbName, DocId, JsonRepDoc);
         <<"completed">> ->
             replication_complete(DbName, DocId),
             State;
