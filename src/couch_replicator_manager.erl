@@ -411,12 +411,12 @@ maybe_start_replication(State, DbName, DocId, RepDoc) ->
     #rep_state{starting = false, dbname = DbName, rep = #rep{doc_id = OtherDocId}} ->
         twig:log(notice, "The replication specified by the document `~s` was already"
             " triggered by the document `~s`", [DocId, OtherDocId]),
-        maybe_tag_rep_doc(DbName, DocId, RepDoc, ?l2b(BaseId)),
+        duplicated_rep_doc(DbName, DocId, RepDoc, ?l2b(BaseId), OtherDocId),
         State;
     #rep_state{starting = true, dbname = DbName, rep = #rep{doc_id = OtherDocId}} ->
         twig:log(notice, "The replication specified by the document `~s` is already"
             " being triggered by the document `~s`", [DocId, OtherDocId]),
-        maybe_tag_rep_doc(DbName, DocId, RepDoc, ?l2b(BaseId)),
+        duplicated_rep_doc(DbName, DocId, RepDoc, ?l2b(BaseId), OtherDocId),
         State
     end.
 
@@ -433,12 +433,19 @@ parse_rep_doc(RepDoc) ->
     Rep.
 
 
-maybe_tag_rep_doc(DbName, DocId, {RepProps}, RepId) ->
-    case get_value(<<"_replication_id">>, RepProps) of
-    RepId ->
+duplicated_rep_doc(DbName, DocId, {RepProps}, RepId, OtherDocId) ->
+    OldRepId = get_value(<<"_replication_id">>, RepProps),
+    OldState = get_value(<<"_replicaiton_state">>, RepProps),
+    OldStats = get_value(<<"_replication_stats">>, RepProps),
+    case {OldRepId, OldState, OldStats} of
+    {RepId, <<"duplicate">>, {[{<<"original_docid">>, OtherDocId}]}} ->
         ok;
     _ ->
-        update_rep_doc(DbName, DocId, [{<<"_replication_id">>, RepId}])
+        update_rep_doc(DbName, DocId, [
+            {<<"_replication_id">>, RepId},
+            {<<"_replication_state">>, <<"duplicate">>},
+            {<<"_replication_stats">>, {[{<<"original_docid">>, OtherDocId}]}}
+        ])
     end.
 
 %% note to self: this is markedly diff from mem3_rep_manager
