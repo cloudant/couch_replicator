@@ -340,11 +340,10 @@ process_update(State, DbName, {Change}) ->
     {RepProps} = JsonRepDoc = get_value(doc, Change),
     DocId = get_value(<<"_id">>, RepProps),
     case {mem3_util:owner(DbName, DocId), get_value(deleted, Change, false)} of
-    {false, _} ->
-        replication_complete(DbName, DocId),
-        State;
-    {true, true} ->
+    {_, true} ->
         rep_doc_deleted(DbName, DocId),
+        State;
+    {false, false} ->
         State;
     {true, false} ->
         case get_value(<<"_replication_state">>, RepProps) of
