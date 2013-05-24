@@ -25,6 +25,8 @@
 % config_listener callback
 -export([handle_config_change/5]).
 
+-export([handle_db_event/3]).
+
 -include_lib("couch/include/couch_db.hrl").
 -include("couch_replicator.hrl").
 
@@ -55,7 +57,7 @@
 ]).
 
 -record(state, {
-    db_notifier = nil,
+    event_listener = nil,
     scan_pid = nil,
     rep_start_pids = [],
     max_retries
@@ -124,7 +126,7 @@ init(_) ->
     ok = config:listen_for_changes(?MODULE, Server),
     ScanPid = spawn_link(fun() -> scan_all_dbs(Server) end),
     {ok, #state{
-        db_notifier = db_update_notifier(),
+        event_listener = start_event_listener(),
         scan_pid = ScanPid,
         max_retries = retries_value(
             config:get("replicator", "max_replication_retry_count", "10"))
@@ -215,7 +217,7 @@ handle_info({'EXIT', From, Reason}, #state{scan_pid = From} = State) ->
     twig:log(error, "Background scanner died. Reason: ~p", [Reason]),
     {stop, {scanner_died, Reason}, State};
 
-handle_info({'EXIT', From, Reason}, #state{db_notifier = From} = State) ->
+handle_info({'EXIT', From, Reason}, #state{event_listener = From} = State) ->
     twig:log(error, "Database update notifier died. Reason: ~p", [Reason]),
     {stop, {db_update_notifier_died, Reason}, State};
 
@@ -244,7 +246,7 @@ terminate(_Reason, State) ->
     #state{
         scan_pid = ScanPid,
         rep_start_pids = StartPids,
-        db_notifier = DbNotifier
+        event_listener = Listener
     } = State,
     stop_all_replications(),
     lists:foreach(
@@ -256,7 +258,7 @@ terminate(_Reason, State) ->
     true = ets:delete(?REP_TO_STATE),
     true = ets:delete(?DOC_TO_REP),
     true = ets:delete(?DB_TO_SEQ),
-    couch_db_update_notifier:stop(DbNotifier).
+    couch_event:stop_listener(Listener).
 
 
 code_change(_OldVsn, State, _Extra) ->
@@ -302,29 +304,31 @@ has_valid_rep_id(<<?DESIGN_DOC_PREFIX, _Rest/binary>>) ->
 has_valid_rep_id(_Else) ->
     true.
 
-db_update_notifier() ->
-    Server = self(),
-    IsReplicatorDbFun = is_replicator_db_fun(),
-    {ok, Notifier} = couch_db_update_notifier:start_link(
-        fun({updated, DbName}) ->
-            case IsReplicatorDbFun(DbName) of
-            true ->
-                ok = gen_server:cast(Server, {resume_scan, mem3:dbname(DbName)});
-            _ ->
-                ok
-            end;
-           ({deleted, DbName}) ->
-            case IsReplicatorDbFun(DbName) of
-            true ->
-                clean_up_replications(mem3:dbname(DbName));
-            _ ->
-                ok
-            end;
-           (_) ->
+start_event_listener() ->
+    State = {self(), is_replicator_db_fun()},
+    {ok, Pid} = couch_event:link_listener(
+            ?MODULE, handle_db_event, State, [all_dbs]
+        ),
+    Pid.
+
+handle_db_event(DbName, updated, {Server, IsRepDbFun}=St) ->
+    case IsRepDbFun(DbName) of
+        true ->
+            ok = gen_server:cast(Server, {resume_scan, mem3:dbname(DbName)});
+        _ ->
             ok
-        end
-    ),
-    Notifier.
+    end,
+    {ok, St};
+handle_db_event(DbName, deleted, {_, IsRepDbFun}=St) ->
+    case IsRepDbFun(DbName) of
+        true ->
+            clean_up_replications(mem3:dbname(DbName));
+        _ ->
+            ok
+    end,
+    {ok, St};
+handle_db_event(_DbName, _Event, St) ->
+    {ok, St}.
 
 rescan(#state{scan_pid = nil} = State) ->
     true = ets:delete_all_objects(?DB_TO_SEQ),
