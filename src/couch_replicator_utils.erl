@@ -226,6 +226,7 @@ make_options(Props) ->
     DefTimeout = config:get("replicator", "connection_timeout", "30000"),
     DefRetries = config:get("replicator", "retries_per_request", "10"),
     UseCheckpoints = config:get("replicator", "use_checkpoints", "true"),
+    DefCheckpointInterval = config:get("replicator", "checkpoint_interval", "5000"),
     {ok, DefSocketOptions} = couch_util:parse_term(
         config:get("replicator", "socket_options",
             "[{keepalive, true}, {nodelay, false}]")),
@@ -236,7 +237,8 @@ make_options(Props) ->
         {socket_options, DefSocketOptions},
         {worker_batch_size, list_to_integer(DefBatchSize)},
         {worker_processes, list_to_integer(DefWorkers)},
-        {use_checkpoints, list_to_existing_atom(UseCheckpoints)}
+        {use_checkpoints, list_to_existing_atom(UseCheckpoints)},
+        {checkpoint_interval, list_to_integer(DefCheckpointInterval)}
     ])).
 
 
@@ -280,6 +282,8 @@ convert_options([{<<"since_seq">>, V} | R]) ->
     [{since_seq, V} | convert_options(R)];
 convert_options([{<<"use_checkpoints">>, V} | R]) ->
     [{use_checkpoints, V} | convert_options(R)];
+convert_options([{<<"checkpoint_interval">>, V} | R]) ->
+    [{checkpoint_interval, couch_util:to_integer(V)} | convert_options(R)];
 convert_options([_ | R]) -> % skip unknown option
     convert_options(R).
 
