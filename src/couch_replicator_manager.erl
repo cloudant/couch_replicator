@@ -682,7 +682,7 @@ scan_all_dbs(Server) when is_pid(Server) ->
     couch_db:close(Db).
 
 is_replicator_db_fun() ->
-    {ok, RegExp} = re:compile("^([a-z][a-z0-9\\_\\$()\\+\\-\\/]*/)?_replicator$"),
+    {ok, RegExp} = re:compile("^([a-z0-9][a-z0-9\\_\\$()\\+\\-\\/]*/)?_replicator$"),
     fun(DbName) ->
         match =:= re:run(mem3:dbname(DbName), RegExp, [{capture,none}])
     end.
