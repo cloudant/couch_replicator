@@ -262,6 +262,7 @@ do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
     MaxConns = get_value(http_connections, Options),
     Workers = lists:map(
         fun(_) ->
+            margaret_counter:increment([couch_replicator, workers_started]),
             {ok, Pid} = couch_replicator_worker:start_link(
                 self(), Source, Target, ChangesManager, MaxConns),
             Pid
@@ -342,6 +343,7 @@ handle_info({'EXIT', Pid, normal}, #rep_state{changes_reader=Pid} = State) ->
     {noreply, State};
 
 handle_info({'EXIT', Pid, Reason}, #rep_state{changes_reader=Pid} = State) ->
+    margaret_counter:increment([couch_replicator, changes_reader_deaths]),
     twig:log(error,"ChangesReader process died with reason: ~p", [Reason]),
     {stop, changes_reader_died, cancel_timer(State)};
 
@@ -349,6 +351,7 @@ handle_info({'EXIT', Pid, normal}, #rep_state{changes_manager = Pid} = State) ->
     {noreply, State};
 
 handle_info({'EXIT', Pid, Reason}, #rep_state{changes_manager = Pid} = State) ->
+    margaret_counter:increment([couch_replicator, changes_manager_deaths]),
     twig:log(error,"ChangesManager process died with reason: ~p", [Reason]),
     {stop, changes_manager_died, cancel_timer(State)};
 
@@ -356,6 +359,7 @@ handle_info({'EXIT', Pid, normal}, #rep_state{changes_queue=Pid} = State) ->
     {noreply, State};
 
 handle_info({'EXIT', Pid, Reason}, #rep_state{changes_queue=Pid} = State) ->
+    margaret_counter:increment([couch_replicator, changes_queue_deaths]),
     twig:log(error,"ChangesQueue process died with reason: ~p", [Reason]),
     {stop, changes_queue_died, cancel_timer(State)};
 
@@ -380,6 +384,7 @@ handle_info({'EXIT', Pid, Reason}, #rep_state{workers = Workers} = State) ->
     false ->
         {stop, {unknown_process_died, Pid, Reason}, State2};
     true ->
+        margaret_counter:increment([couch_replicator, worker_deaths]),
         twig:log(error,"Worker ~p died with reason: ~p", [Pid, Reason]),
         {stop, {worker_died, Pid, Reason}, State2}
     end;
@@ -450,8 +455,10 @@ handle_cast({db_compacted, DbName},
 handle_cast(checkpoint, State) ->
     case do_checkpoint(State) of
     {ok, NewState} ->
+        margaret_counter:increment([couch_replicator, checkpoints, success]),
         {noreply, NewState#rep_state{timer = start_timer(State)}};
     Error ->
+        margaret_counter:increment([couch_replicator, checkpoints, failure]),
         {stop, Error, State}
     end;
 
@@ -494,6 +501,7 @@ terminate(Reason, #rep_state{} = State) ->
 
 terminate(shutdown, {error, Class, Error, Stack, InitArgs}) ->
     #rep{id=RepId} = InitArgs,
+    margaret_counter:increment([couch_replicator, failed_starts]),
     twig:log(error,"~p:~p: Replication failed to start for args ~p: ~p",
              [Class, Error, InitArgs, Stack]),
     case Error of
@@ -522,8 +530,10 @@ do_last_checkpoint(#rep_state{seqs_in_progress = [],
     highest_seq_done = Seq} = State) ->
     case do_checkpoint(State#rep_state{current_through_seq = Seq}) of
     {ok, NewState} ->
+        margaret_counter:increment([couch_replicator, checkpoints, success]),
         {stop, normal, cancel_timer(NewState)};
     Error ->
+        margaret_counter:increment([couch_replicator, checkpoints, failure]),
         {stop, Error, State}
     end.
 
@@ -677,6 +687,7 @@ read_changes(Parent, StartSeq, Db, ChangesQueue, Options, Ts) ->
             LS = get(last_seq),
             read_changes(Parent, LS, Db, ChangesQueue, Options, Ts+1);
         exit:{http_request_failed, _, _, _} = Error ->
+        margaret_counter:increment([couch_replicator, changes_read_failures]),
         case get(retries_left) of
         N when N > 0 ->
             put(retries_left, N - 1),
