@@ -305,30 +305,29 @@ has_valid_rep_id(_Else) ->
     true.
 
 start_event_listener() ->
-    State = {self(), is_replicator_db_fun()},
     {ok, Pid} = couch_event:link_listener(
-            ?MODULE, handle_db_event, State, [all_dbs]
+            ?MODULE, handle_db_event, self(), [all_dbs]
         ),
     Pid.
 
-handle_db_event(DbName, updated, {Server, IsRepDbFun}=St) ->
-    case IsRepDbFun(DbName) of
+handle_db_event(DbName, updated, Server) ->
+    case is_replicator_db(DbName) of
         true ->
             ok = gen_server:cast(Server, {resume_scan, mem3:dbname(DbName)});
         _ ->
             ok
     end,
-    {ok, St};
-handle_db_event(DbName, deleted, {_, IsRepDbFun}=St) ->
-    case IsRepDbFun(DbName) of
+    {ok, Server};
+handle_db_event(DbName, deleted, Server) ->
+    case is_replicator_db(DbName) of
         true ->
             clean_up_replications(mem3:dbname(DbName));
         _ ->
             ok
     end,
-    {ok, St};
-handle_db_event(_DbName, _Event, St) ->
-    {ok, St}.
+    {ok, Server};
+handle_db_event(_DbName, _Event, Server) ->
+    {ok, Server}.
 
 rescan(#state{scan_pid = nil} = State) ->
     true = ets:delete_all_objects(?DB_TO_SEQ),
@@ -665,7 +664,6 @@ scan_all_dbs(Server) when is_pid(Server) ->
     {ok, Db} = mem3_util:ensure_exists(
         config:get("mem3", "shard_db", "dbs")),
     ChangesFun = couch_changes:handle_changes(#changes_args{}, nil, Db),
-    IsReplicatorDbFun = is_replicator_db_fun(),
     ChangesFun(fun({change, {Change}, _}, _) ->
         DbName = couch_util:get_value(<<"id">>, Change),
         case DbName of <<"_design/", _/binary>> -> ok; _Else ->
@@ -673,7 +671,7 @@ scan_all_dbs(Server) when is_pid(Server) ->
             true ->
                 ok;
             false ->
-                IsReplicatorDbFun(DbName) andalso
+                is_replicator_db(DbName) andalso
                 gen_server:cast(Server, {resume_scan, DbName})
             end
         end;
@@ -681,13 +679,11 @@ scan_all_dbs(Server) when is_pid(Server) ->
     end),
     couch_db:close(Db).
 
-is_replicator_db_fun() ->
-    fun(Name) ->
-        DbName = mem3:dbname(Name),
-        case lists:last(binary:split(DbName, <<"/">>, [global])) of
-            <<"_replicator">> ->
-                true;
-            _ ->
-                false
-        end
+is_replicator_db(Name) ->
+    DbName = mem3:dbname(Name),
+    case lists:last(binary:split(DbName, <<"/">>, [global])) of
+        <<"_replicator">> ->
+            true;
+        _ ->
+            false
     end.
