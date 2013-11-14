@@ -132,6 +132,7 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
         R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
             do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
         Error ->
+            clean_mailbox_req(ReqId),
             margaret_counter:increment(
                 [couch_replicator, stream_responses, failure]),
             report_error(Worker, HttpDb, Params, {code, Error})
@@ -139,11 +140,13 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
     {ibrowse_async_response, ReqId, {error, _} = Error} ->
         margaret_counter:increment(
             [couch_replicator, stream_responses, failure]),
+        clean_mailbox_req(ReqId),
         maybe_retry(Error, Worker, HttpDb, Params, Callback)
     after HttpDb#httpdb.timeout + 500 ->
         % Note: ibrowse should always reply with timeouts, but this doesn't
         % seem to be always true when there's a very high rate of requests
         % and many open connections.
+        clean_mailbox_req(ReqId),
         maybe_retry(timeout, Worker, HttpDb, Params, Callback)
     end.
 
