@@ -121,9 +121,13 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
                 release_worker(Worker, HttpDb),
                 clean_mailbox_req(ReqId),
                 Ret
-            catch throw:{maybe_retry_req, Err} ->
-                clean_mailbox_req(ReqId),
-                maybe_retry(Err, Worker, HttpDb, Params, Callback)
+            catch
+                throw:{maybe_retry_req, Err} ->
+                    clean_mailbox_req(ReqId),
+                    maybe_retry(Err, Worker, HttpDb, Params, Callback);
+                throw:recurse ->
+                    clean_mailbox_req(ReqId),
+                    throw(recurse)
             end;
         R when R =:= 301 ; R =:= 302 ; R =:= 303 ->
             do_redirect(Worker, R, Headers, HttpDb, Params, Callback);
