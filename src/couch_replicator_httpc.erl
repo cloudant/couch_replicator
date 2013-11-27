@@ -123,9 +123,11 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
                 Ret
             catch
                 throw:{maybe_retry_req, Err} ->
+                    release_worker(Worker, HttpDb),
                     clean_mailbox_req(ReqId),
                     maybe_retry(Err, Worker, HttpDb, Params, Callback);
                 throw:recurse ->
+                    release_worker(Worker, HttpDb),
                     clean_mailbox_req(ReqId),
                     throw(recurse)
             end;
