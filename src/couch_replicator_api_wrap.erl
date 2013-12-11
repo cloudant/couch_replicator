@@ -245,7 +245,7 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
             ),
             #httpdb{retries = Retries, wait = Wait0} = HttpDb,
             Wait = 2 * erlang:min(Wait0 * 2, ?MAX_WAIT),
-            twig:log(notice,"Retrying GET to ~s in ~p seconds due to error ~p",
+            twig:log(notice,"Retrying GET to ~s in ~p seconds due to error ~w",
                 [Url, Wait / 1000, Else]
             ),
             ok = timer:sleep(Wait),
