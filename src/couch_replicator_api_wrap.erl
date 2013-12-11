@@ -26,6 +26,7 @@
     db_open/3,
     db_close/1,
     get_db_info/1,
+    get_pending_count/2,
     update_doc/3,
     update_doc/4,
     update_docs/3,
@@ -117,6 +118,29 @@ get_db_info(#db{name = DbName, user_ctx = UserCtx}) ->
     {ok, Info} = couch_db:get_db_info(Db),
     couch_db:close(Db),
     {ok, [{couch_util:to_binary(K), V} || {K, V} <- Info]}.
+
+
+get_pending_count(#httpdb{} = Db, Seq) when is_number(Seq) ->
+    % Source looks like Apache CouchDB and not Cloudant so we fall
+    % back to using update sequence differences.
+    send_req(Db, [], fun(200, _, {Props}) ->
+        case get_value(<<"update_seq">>, Props) of
+            UpdateSeq when is_number(UpdateSeq) ->
+                {ok, UpdateSeq - Seq};
+            _ ->
+                {ok, null}
+        end
+    end);
+get_pending_count(#httpdb{} = Db, Seq) ->
+    Options = [{path, "_changes"}, {qs, [{"since", Seq}, {"limit", "0"}]}],
+    send_req(Db, Options, fun(200, _, {Props}) ->
+        {ok, couch_util:get_value(<<"pending">>, Props, null)}
+    end);
+get_pending_count(#db{name=DbName}=Db, Seq) when is_number(Seq) ->
+    {ok, Db} = couch_db:open(DbName, [{user_ctx, Db#db.user_ctx}]),
+    Pending = couch_db:count_changes_since(Db, Seq),
+    couch_db:close(Db),
+    {ok, Pending}.
 
 
 ensure_full_commit(#httpdb{} = Db) ->
@@ -221,7 +245,7 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
             ),
             #httpdb{retries = Retries, wait = Wait0} = HttpDb,
             Wait = 2 * erlang:min(Wait0 * 2, ?MAX_WAIT),
-            twig:log(notice,"Retrying GET to ~s in ~p seconds due to error ~p",
+            twig:log(notice,"Retrying GET to ~s in ~p seconds due to error ~w",
                 [Url, Wait / 1000, Else]
             ),
             ok = timer:sleep(Wait),
