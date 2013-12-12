@@ -756,10 +756,11 @@ doc_from_multi_part_stream(ContentType, DataFun, Ref) ->
             end
         end,
         Atts2 = lists:map(
-            fun(#att{data = follows} = A) ->
-                A#att{data = ReadAttachmentDataFun};
-            (A) ->
-                A
+            fun(Att) ->
+                case couch_att:fetch(data, Att) of
+                    follows -> couch_att:store(data, ReadAttachmentDataFun, Att);
+                    _ -> Att
+                end
             end, Doc#doc.atts),
         {ok, Doc#doc{atts = Atts2}, Parser}
     end.
