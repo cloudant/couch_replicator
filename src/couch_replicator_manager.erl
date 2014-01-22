@@ -281,7 +281,7 @@ changes_feed_loop(DbName, Since) ->
                     ok
                 end,
                 {ok, Acc};
-            ({stop, EndSeq}, Acc) ->
+            ({stop, EndSeq, _Pending}, Acc) ->
                 ok = gen_server:call(Server, {rep_db_checkpoint, DbName, EndSeq}, infinity),
                 {ok, Acc};
             (_, Acc) ->
