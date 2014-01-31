@@ -23,6 +23,9 @@
 -export([start_link/0, init/1, handle_call/3, handle_info/2, handle_cast/2]).
 -export([code_change/3, terminate/2]).
 
+% changes callbacks
+-export([changes_reader/3, changes_reader_cb/2]).
+
 % config_listener callback
 -export([handle_config_change/5]).
 
@@ -177,7 +180,7 @@ handle_call({resume_scan, DbName}, _From, State) ->
         [] -> 0;
         [{DbName, EndSeq}] -> EndSeq
     end,
-    Pid = changes_feed_loop(DbName, Since),
+    Pid = start_changes_reader(DbName, Since),
     twig:log(debug, "Scanning ~s from update_seq ~p", [DbName, Since]),
     {reply, ok, State#state{rep_start_pids = [Pid | State#state.rep_start_pids]}};
 
@@ -195,7 +198,7 @@ handle_cast({resume_scan, DbName}, State) ->
         [] -> 0;
         [{DbName, EndSeq}] -> EndSeq
     end,
-    Pid = changes_feed_loop(DbName, Since),
+    Pid = start_changes_reader(DbName, Since),
     twig:log(debug, "Scanning ~s from update_seq ~p", [DbName, Since]),
     {noreply, State#state{rep_start_pids = [Pid | State#state.rep_start_pids]}};
 
@@ -267,38 +270,37 @@ terminate(_Reason, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-changes_feed_loop(DbName, Since) ->
-    Server = self(),
-    Pid = spawn_link(
-        fun() ->
-            fabric:changes(DbName, fun
-            ({change, Change}, Acc) ->
-                case has_valid_rep_id(Change) of
-                true ->
-                    ok = gen_server:call(
-                        Server, {rep_db_update, DbName, Change}, infinity);
-                false ->
-                    ok
-                end,
-                {ok, Acc};
-            ({stop, EndSeq, _Pending}, Acc) ->
-                ok = gen_server:call(Server, {rep_db_checkpoint, DbName, EndSeq}, infinity),
-                {ok, Acc};
-            (_, Acc) ->
-                {ok, Acc}
-            end,
-            nil,
-            #changes_args{
-                include_docs = true,
-                feed = "longpoll",
-                since = Since,
-                filter = main_only,
-                timeout = infinity
-                }
-            )
-        end),
-    Pid.
 
+start_changes_reader(DbName, Since) ->
+    spawn_link(?MODULE, changes_reader, [self(), DbName, Since]).
+
+changes_reader(Server, DbName, Since) ->
+    CBFun = fun ?MODULE:changes_reader_cb/2,
+    Acc = {Server, DbName},
+    Args = #changes_args{
+        include_docs = true,
+        feed = "longpoll",
+        since = Since,
+        filter = main_only,
+        timeout = infinity
+    },
+    fabric:changes(DbName, CBFun, Acc, Args).
+
+changes_reader_cb({change, Change}, {Server, DbName}) ->
+    case has_valid_rep_id(Change) of
+        true ->
+            Msg = {rep_db_update, DbName, Change},
+            ok = gen_server:call(Server, Msg, infinity);
+        false ->
+            ok
+    end,
+    {ok, {Server, DbName}};
+changes_reader_cb({stop, EndSeq, _Pending}, {Server, DbName}) ->
+    Msg = {rep_db_checkpoint, DbName, EndSeq},
+    ok = gen_server:call(Server, Msg, infinity),
+    {ok, {Server, DbName}};
+changes_reader_cb(_, Acc) ->
+    {ok, Acc}.
 
 has_valid_rep_id({Change}) ->
     has_valid_rep_id(get_value(<<"id">>, Change));
