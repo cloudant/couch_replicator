@@ -32,6 +32,7 @@
 -export([handle_db_event/3]).
 
 -include_lib("couch/include/couch_db.hrl").
+-include_lib("mem3/include/mem3.hrl").
 -include("couch_replicator.hrl").
 
 -define(DOC_TO_REP, couch_rep_doc_id_to_rep_id).
@@ -359,7 +360,7 @@ rescan(#state{scan_pid = ScanPid} = State) ->
 process_update(State, DbName, {Change}) ->
     {RepProps} = JsonRepDoc = get_value(doc, Change),
     DocId = get_value(<<"_id">>, RepProps),
-    case {mem3_util:owner(DbName, DocId), get_value(deleted, Change, false)} of
+    case {owner(DbName, DocId), get_value(deleted, Change, false)} of
     {_, true} ->
         rep_doc_deleted(DbName, DocId),
         State;
@@ -383,6 +384,12 @@ process_update(State, DbName, {Change}) ->
             end
         end
     end.
+
+owner(DbName, DocId) ->
+    Live = [node()|nodes()],
+    Nodes = lists:sort([N || #shard{node=N} <- mem3:shards(DbName, DocId),
+			     lists:member(N, Live)]),
+    node() =:= hd(mem3_util:rotate_list({DbName, DocId}, Nodes)).
 
 rep_db_update_error(Error, DbName, DocId) ->
     case Error of
