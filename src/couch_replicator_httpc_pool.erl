@@ -34,7 +34,10 @@
     free = [],              % free workers (connections)
     busy = [],              % busy workers (connections)
     waiting = queue:new(),  % blocked clients waiting for a worker
-    callers = []            % clients who've been given a worker
+    callers = [],           % clients who've been given a worker
+    closing = [],           % workers pending closing due to DNS refresh
+    dns_data,               % The resolved IP for the target URL
+    dns_ttl                 % The DNS time-to-live
 }).
 
 
@@ -55,7 +58,22 @@ release_worker(Pool, Worker) ->
 
 init({Url, Options}) ->
     process_flag(trap_exit, true),
-    State = #state{
+    State0 = case couch_replicator_dns:lookup(Url) of
+        {ok, {Data, TTL}} ->
+            timer:send_after(TTL * 1000, refresh_dns),
+            #state{
+                dns_data = Data,
+                dns_ttl = TTL
+            };
+        {error, Error} ->
+            twig:log(
+                warn,
+                "couch_replicator_httpc_pool failed DNS lookup: ~p",
+                [Error]
+            ),
+            #state{}
+    end,
+    State = State0#state{
         url = Url,
         limit = get_value(max_connections, Options)
     },
@@ -92,7 +110,34 @@ handle_info({'DOWN', Ref, process, _, _}, #state{callers = Callers} = State0) ->
             {noreply, State2};
         false ->
             {noreply, State0}
-    end.
+    end;
+
+handle_info(refresh_dns, State0) ->
+    #state{url=Url, dns_data=Data0}=State0,
+    State1 = case couch_replicator_dns:lookup(Url) of
+        {ok, {Data0, TTL}} ->
+            State0#state{dns_ttl=TTL};
+        {ok, {Data1, TTL}} ->
+            #state{free=Free, busy=Busy, closing=Closing} = State0,
+            lists:foreach(fun ibrowse_http_client:stop/1, Free),
+            State0#state{
+                dns_data=Data1,
+                dns_ttl=TTL,
+                closing=Busy ++ Closing,
+                free=[],
+                busy=[]
+            };
+        {error, Error} ->
+            twig:log(
+                warn,
+                "couch_replicator_httpc_pool failed DNS lookup: ~p",
+                [Error]
+            ),
+            State0
+    end,
+    timer:send_after(State1#state.dns_ttl * 1000, refresh_dns),
+    {noreply, State1}.
+
 
 code_change(_OldVsn, #state{}=State, _Extra) ->
     {ok, State}.
@@ -106,10 +151,12 @@ terminate(_Reason, State) ->
 release_worker_int(Worker, State0) ->
     #state{
         callers = Callers,
-        busy = Busy
+        busy = Busy,
+        closing = Closing
     } = State0,
     State0#state{
         callers = demonitor_client(Callers, Worker),
+        closing = Closing -- [Worker],
         busy = Busy -- [Worker]
     }.
 
@@ -121,13 +168,14 @@ maybe_supply_worker(State) ->
         callers = Callers,
         busy = Busy,
         free = Free0,
+        closing = Closing,
         limit = Limit
     } = State,
     case queue:out(Waiting0) of
         {empty, Waiting0} ->
             State;
         {{value, From}, Waiting1} ->
-            case length(Busy) >= Limit of
+            case length(Busy) + length(Closing) >= Limit of
                 true ->
                     State;
                 false ->
