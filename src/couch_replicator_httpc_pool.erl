@@ -62,106 +62,36 @@ init({Url, Options}) ->
     {ok, State}.
 
 
-handle_call(get_worker, From, State) ->
-    #state{
-        waiting = Waiting,
-        callers = Callers,
-        url = Url,
-        limit = Limit,
-        busy = Busy,
-        free = Free
-    } = State,
-    case length(Busy) >= Limit of
-    true ->
-        {noreply, State#state{waiting = queue:in(From, Waiting)}};
-    false ->
-        case Free of
-        [] ->
-           {ok, Worker} = ibrowse:spawn_link_worker_process(Url),
-           Free2 = Free;
-        [Worker | Free2] ->
-           ok
-        end,
-        NewState = State#state{
-            free = Free2,
-            busy = [Worker | Busy],
-            callers = monitor_client(Callers, Worker, From)
-        },
-        {reply, {ok, Worker}, NewState}
-    end;
+handle_call(get_worker, From, State0) ->
+    State1 = State0#state{
+        waiting = queue:in(From, State0#state.waiting)
+    },
+    State2 = maybe_supply_worker(State1),
+    {noreply, State2};
 
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State}.
 
 
-handle_cast({release_worker, Worker}, State) ->
-    #state{waiting = Waiting, callers = Callers} = State,
-    NewCallers0 = demonitor_client(Callers, Worker),
-    case is_process_alive(Worker) andalso
-        lists:member(Worker, State#state.busy) of
-    true ->
-        case queue:out(Waiting) of
-        {empty, Waiting2} ->
-            NewCallers1 = NewCallers0,
-            Busy2 = State#state.busy -- [Worker],
-            Free2 = [Worker | State#state.free];
-        {{value, From}, Waiting2} ->
-            NewCallers1 = monitor_client(NewCallers0, Worker, From),
-            gen_server:reply(From, {ok, Worker}),
-            Busy2 = State#state.busy,
-            Free2 = State#state.free
-        end,
-        NewState = State#state{
-           busy = Busy2,
-           free = Free2,
-           waiting = Waiting2,
-           callers = NewCallers1
-        },
-        {noreply, NewState};
-   false ->
-        {noreply, State#state{callers = NewCallers0}}
-   end.
+handle_cast({release_worker, Worker}, State0) ->
+    State1 = release_worker_int(Worker, State0),
+    State2 = maybe_supply_worker(State1),
+    {noreply, State2}.
 
-handle_info({'EXIT', Pid, _Reason}, State) ->
-    #state{
-        url = Url,
-        busy = Busy,
-        free = Free,
-        waiting = Waiting,
-        callers = Callers
-    } = State,
-    NewCallers0 = demonitor_client(Callers, Pid),
-    case Free -- [Pid] of
-    Free ->
-        case Busy -- [Pid] of
-        Busy ->
-            {noreply, State#state{callers = NewCallers0}};
-        Busy2 ->
-            case queue:out(Waiting) of
-            {empty, _} ->
-                {noreply, State#state{busy = Busy2, callers = NewCallers0}};
-            {{value, From}, Waiting2} ->
-                {ok, Worker} = ibrowse:spawn_link_worker_process(Url),
-                NewCallers1 = monitor_client(NewCallers0, Worker, From),
-                gen_server:reply(From, {ok, Worker}),
-                NewState = State#state{
-                    busy = [Worker | Busy2],
-                    waiting = Waiting2,
-                    callers = NewCallers1
-                },
-                {noreply, NewState}
-            end
-        end;
-    Free2 ->
-        {noreply, State#state{free = Free2, callers = NewCallers0}}
-    end;
 
-handle_info({'DOWN', Ref, process, _, _}, #state{callers = Callers} = State) ->
+handle_info({'EXIT', Worker, _Reason}, State0) ->
+    State1 = release_worker_int(Worker, State0),
+    State2 = maybe_supply_worker(State1),
+    {noreply, State2};
+
+handle_info({'DOWN', Ref, process, _, _}, #state{callers = Callers} = State0) ->
     case lists:keysearch(Ref, 2, Callers) of
         {value, {Worker, Ref}} ->
-            handle_cast({release_worker, Worker}, State);
+            State1 = release_worker_int(Worker, State0),
+            State2 = maybe_supply_worker(State1),
+            {noreply, State2};
         false ->
-            {noreply, State}
+            {noreply, State0}
     end.
 
 code_change(_OldVsn, #state{}=State, _Extra) ->
@@ -171,6 +101,53 @@ code_change(_OldVsn, #state{}=State, _Extra) ->
 terminate(_Reason, State) ->
     lists:foreach(fun ibrowse_http_client:stop/1, State#state.free),
     lists:foreach(fun ibrowse_http_client:stop/1, State#state.busy).
+
+
+release_worker_int(Worker, State0) ->
+    #state{
+        callers = Callers,
+        busy = Busy
+    } = State0,
+    State0#state{
+        callers = demonitor_client(Callers, Worker),
+        busy = Busy -- [Worker]
+    }.
+
+
+maybe_supply_worker(State) ->
+    #state{
+        url = Url,
+        waiting = Waiting0,
+        callers = Callers,
+        busy = Busy,
+        free = Free0,
+        limit = Limit
+    } = State,
+    case queue:out(Waiting0) of
+        {empty, Waiting0} ->
+            State;
+        {{value, From}, Waiting1} ->
+            case length(Busy) >= Limit of
+                true ->
+                    State;
+                false ->
+                    {Worker, Free2} = case Free0 of
+                        [] ->
+                            {ok, W} = ibrowse:spawn_link_worker_process(Url),
+                            {W, Free0};
+                        [W|Free1] ->
+                            {W, Free1}
+                    end,
+                    gen_server:reply(From, {ok, Worker}),
+                    State#state{
+                        callers = monitor_client(Callers, Worker, From),
+                        waiting = Waiting1,
+                        busy = [Worker|Busy],
+                        free = Free2
+                    }
+            end
+    end.
+
 
 monitor_client(Callers, Worker, {ClientPid, _}) ->
     [{Worker, erlang:monitor(process, ClientPid)} | Callers].
