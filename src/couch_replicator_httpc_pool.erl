@@ -12,7 +12,7 @@
 
 -module(couch_replicator_httpc_pool).
 -behaviour(gen_server).
--vsn(1).
+-vsn(2).
 
 % public API
 -export([start_link/2, stop/1]).
@@ -138,6 +138,33 @@ handle_info(refresh_dns, State0) ->
     timer:send_after(State1#state.dns_ttl * 1000, refresh_dns),
     {noreply, State1}.
 
+
+code_change(1, OldState, _Extra) ->
+    {state, Url, Limit, Free, Busy, Waiting, Callers} = OldState,
+    State0 = case couch_replicator_dns:lookup(Url) of
+        {ok, {Data, TTL}} ->
+            timer:send_after(TTL * 1000, refresh_dns),
+            #state{
+                dns_data = Data,
+                dns_ttl = TTL
+            };
+        {error, Error} ->
+            twig:log(
+                warn,
+                "couch_replicator_httpc_pool failed DNS lookup: ~p",
+                [Error]
+            ),
+            #state{}
+    end,
+    State1 = State0#state{
+        url = Url,
+        limit = Limit,
+        free = Free,
+        busy = Busy,
+        waiting = Waiting,
+        callers = Callers
+    },
+    {ok, State1};
 
 code_change(_OldVsn, #state{}=State, _Extra) ->
     {ok, State}.
