@@ -571,13 +571,16 @@ clean_up_replications(DbName) ->
     ets:delete(?DB_TO_SEQ,DbName).
 
 
-update_rep_doc(RepDbName, RepDocId, KVs) when is_binary(RepDocId) ->
+update_rep_doc(RepDbName, RepDocId, KVs) ->
+    update_rep_doc(RepDbName, RepDocId, KVs, 1).
+
+update_rep_doc(RepDbName, RepDocId, KVs, Wait) when is_binary(RepDocId) ->
     {Pid, Ref} =
     spawn_monitor(fun() ->
         try
             case fabric:open_doc(mem3:dbname(RepDbName), RepDocId, []) of
                 {ok, LatestRepDoc} ->
-                    update_rep_doc(RepDbName, LatestRepDoc, KVs);
+                    update_rep_doc(RepDbName, LatestRepDoc, KVs, Wait * 2);
                 _ ->
                     ok
             end
@@ -587,8 +590,8 @@ update_rep_doc(RepDbName, RepDocId, KVs) when is_binary(RepDocId) ->
             % in which cae update_rep_doc is called again to refetch
             twig:log(error, "Conflict error when updating replication document `~s`."
                          " Retrying.", [RepDocId]),
-            ok = timer:sleep(5),
-            update_rep_doc(RepDbName, RepDocId, KVs);
+            ok = timer:sleep(random:uniform(erlang:min(128, Wait)) * 100),
+            update_rep_doc(RepDbName, RepDocId, KVs, Wait * 2);
         Type:Error ->
             exit({Type, Error})
         end
@@ -602,7 +605,7 @@ update_rep_doc(RepDbName, RepDocId, KVs) when is_binary(RepDocId) ->
         erlang:error(Error)
     end;
 
-update_rep_doc(RepDbName, #doc{body = {RepDocBody}} = RepDoc, KVs) ->
+update_rep_doc(RepDbName, #doc{body = {RepDocBody}} = RepDoc, KVs, _Try) ->
     NewRepDocBody = lists:foldl(
         fun({K, undefined}, Body) ->
                 lists:keydelete(K, 1, Body);
