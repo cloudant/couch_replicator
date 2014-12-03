@@ -434,7 +434,14 @@ maybe_start_replication(State, DbName, DocId, RepDoc) ->
         true = ets:insert(?DOC_TO_REP, {{DbName, DocId}, RepId}),
         twig:log(notice,"Attempting to start replication `~s` (document `~s`).",
             [pp_rep_id(RepId), DocId]),
-        Pid = spawn_link(?MODULE, start_replication, [Rep, 0]),
+        StartDelaySecs = erlang:max(0, list_to_integer(
+            config:get("replicator", "start_delay", "10"))),
+        StartSplaySecs = erlang:max(1, list_to_integer(
+            config:get("replicator", "start_splay", "50"))),
+        DelaySecs = StartDelaySecs + random:uniform(StartSplaySecs),
+        twig:log(notice, "Delaying replication `~s` start by ~p seconds.",
+            [pp_rep_id(RepId), DelaySecs]),
+        Pid = spawn_link(?MODULE, start_replication, [Rep, DelaySecs]),
         State#state{rep_start_pids = [Pid | State#state.rep_start_pids]};
     #rep_state{rep = #rep{doc_id = DocId}} ->
         State;
