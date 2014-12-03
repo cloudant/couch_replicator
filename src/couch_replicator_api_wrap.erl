@@ -78,9 +78,16 @@ db_open(#httpdb{} = Db1, _Options, Create) ->
                     ok
                 end)
         end,
-        send_req(Db, [{method, head}],
-            fun(200, _, _) ->
-                {ok, Db};
+        send_req(Db, [{method, get}],
+            fun(200, _, {Props}) ->
+                case get_value(<<"update_seq">>, Props) of
+                    undefined ->
+                        throw({db_not_found, ?l2b(db_uri(Db))});
+                    _ ->
+                        {ok, Db}
+                end;
+            (200, _, _Body) ->
+                 throw({db_not_found, ?l2b(db_uri(Db))});
             (401, _, _) ->
                 throw({unauthorized, ?l2b(db_uri(Db))});
             (_, _, _) ->
