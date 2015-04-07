@@ -67,16 +67,18 @@
 
 
 
-start_link(Cp, #db2{} = Source, Target, ChangesManager, _MaxConns) ->
+start_link(Cp, #httpdb{} = Source, Target, ChangesManager, MaxConns) ->
+    gen_server:start_link(
+        ?MODULE, {Cp, Source, Target, ChangesManager, MaxConns}, []);
+
+start_link(Cp, Source, Target, ChangesManager, _MaxConns) ->
+    true = couch_db:is_db(Source),
     Pid = spawn_link(fun() ->
         erlang:put(last_stats_report, now()),
         queue_fetch_loop(Source, Target, Cp, Cp, ChangesManager)
     end),
     {ok, Pid};
 
-start_link(Cp, Source, Target, ChangesManager, MaxConns) ->
-    gen_server:start_link(
-        ?MODULE, {Cp, Source, Target, ChangesManager, MaxConns}, []).
 
 
 init({Cp, Source, Target, ChangesManager, MaxConns}) ->
@@ -139,15 +141,37 @@ handle_call(flush, {Pid, _} = From,
     {noreply, State2#state{flush_waiter = From}}.
 
 
-handle_cast({db_compacted, DbName},
-    #state{source = #db2{name = DbName} = Source} = State) ->
-    {ok, NewSource} = couch_db:reopen(Source),
-    {noreply, State#state{source = NewSource}};
-
-handle_cast({db_compacted, DbName},
-    #state{target = #db2{name = DbName} = Target} = State) ->
-    {ok, NewTarget} = couch_db:reopen(Target),
-    {noreply, State#state{target = NewTarget}};
+handle_cast({db_compacted, DbName}, State) ->
+    #state{
+        source = Source,
+        target = Target
+    } = State,
+    NewSource = case couch_db:is_db(Source) of
+        true ->
+            case couch_db:name(Source) of
+                DbName ->
+                    couch_db:reopen(Source);
+                _ ->
+                    Source
+            end;
+        false ->
+            Source
+    end,
+    NewTarget = case couch_db:is_db(Target) of
+        true ->
+            case couch_db:name(Target) of
+                DbName ->
+                    couch_db:reopen(Target);
+                _ ->
+                    Target
+            end;
+        false ->
+            Target
+    end,
+    {noreply, #state{
+        source = NewSource,
+        target = NewTarget
+    }};
 
 handle_cast(Msg, State) ->
     {stop, {unexpected_async_call, Msg}, State}.
@@ -220,15 +244,15 @@ queue_fetch_loop(Source, Target, Parent, Cp, ChangesManager) ->
         Target2 = open_db(Target),
         {IdRevs, Stats0} = find_missing(Changes, Target2),
         case Source of
-        #db2{} ->
+        #httpdb{} ->
+            ok = gen_server:call(Parent, {add_stats, Stats0}, infinity),
+            remote_process_batch(IdRevs, Parent),
+            {ok, Stats} = gen_server:call(Parent, flush, infinity);
+        _ ->
             Source2 = open_db(Source),
             Stats = local_process_batch(
                 IdRevs, Cp, Source2, Target2, #batch{}, Stats0),
             close_db(Source2);
-        #httpdb{} ->
-            ok = gen_server:call(Parent, {add_stats, Stats0}, infinity),
-            remote_process_batch(IdRevs, Parent),
-            {ok, Stats} = gen_server:call(Parent, flush, infinity)
         end,
         close_db(Target2),
         ok = gen_server:call(Cp, {report_seq_done, ReportSeq, Stats}, infinity),
@@ -245,7 +269,7 @@ local_process_batch([], Cp, Source, Target, #batch{docs = Docs, size = Size}, St
     case Target of
     #httpdb{} ->
         twig:log(debug,"Worker flushing doc batch of size ~p bytes", [Size]);
-    #db2{} ->
+    _ ->
         twig:log(debug,"Worker flushing doc batch of ~p docs", [Size])
     end,
     Stats2 = flush_docs(Target, Docs),
@@ -360,7 +384,7 @@ spawn_writer(Target, #batch{docs = DocList, size = Size}) ->
     case {Target, Size > 0} of
     {#httpdb{}, true} ->
         twig:log(debug,"Worker flushing doc batch of size ~p bytes", [Size]);
-    {#db2{}, true} ->
+    {_, true} ->
         twig:log(debug,"Worker flushing doc batch of ~p docs", [Size]);
     _ ->
         ok
@@ -422,7 +446,8 @@ maybe_flush_docs(#httpdb{} = Target, Batch, Doc) ->
         end
     end;
 
-maybe_flush_docs(#db2{} = Target, #batch{docs = DocAcc, size = SizeAcc}, Doc) ->
+maybe_flush_docs(Target, #batch{docs = DocAcc, size = SizeAcc}, Doc) ->
+    true = couch_db:is_db(Target),
     case SizeAcc + 1 of
     SizeAcc2 when SizeAcc2 >= ?DOC_BUFFER_LEN ->
         twig:log(debug,"Worker flushing doc batch of ~p docs", [SizeAcc2]),
