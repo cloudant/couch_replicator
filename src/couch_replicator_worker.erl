@@ -67,7 +67,7 @@
 
 
 
-start_link(Cp, #db{} = Source, Target, ChangesManager, _MaxConns) ->
+start_link(Cp, #db2{} = Source, Target, ChangesManager, _MaxConns) ->
     Pid = spawn_link(fun() ->
         erlang:put(last_stats_report, now()),
         queue_fetch_loop(Source, Target, Cp, Cp, ChangesManager)
@@ -140,12 +140,12 @@ handle_call(flush, {Pid, _} = From,
 
 
 handle_cast({db_compacted, DbName},
-    #state{source = #db{name = DbName} = Source} = State) ->
+    #state{source = #db2{name = DbName} = Source} = State) ->
     {ok, NewSource} = couch_db:reopen(Source),
     {noreply, State#state{source = NewSource}};
 
 handle_cast({db_compacted, DbName},
-    #state{target = #db{name = DbName} = Target} = State) ->
+    #state{target = #db2{name = DbName} = Target} = State) ->
     {ok, NewTarget} = couch_db:reopen(Target),
     {noreply, State#state{target = NewTarget}};
 
@@ -220,7 +220,7 @@ queue_fetch_loop(Source, Target, Parent, Cp, ChangesManager) ->
         Target2 = open_db(Target),
         {IdRevs, Stats0} = find_missing(Changes, Target2),
         case Source of
-        #db{} ->
+        #db2{} ->
             Source2 = open_db(Source),
             Stats = local_process_batch(
                 IdRevs, Cp, Source2, Target2, #batch{}, Stats0),
@@ -245,7 +245,7 @@ local_process_batch([], Cp, Source, Target, #batch{docs = Docs, size = Size}, St
     case Target of
     #httpdb{} ->
         twig:log(debug,"Worker flushing doc batch of size ~p bytes", [Size]);
-    #db{} ->
+    #db2{} ->
         twig:log(debug,"Worker flushing doc batch of ~p docs", [Size])
     end,
     Stats2 = flush_docs(Target, Docs),
@@ -360,7 +360,7 @@ spawn_writer(Target, #batch{docs = DocList, size = Size}) ->
     case {Target, Size > 0} of
     {#httpdb{}, true} ->
         twig:log(debug,"Worker flushing doc batch of size ~p bytes", [Size]);
-    {#db{}, true} ->
+    {#db2{}, true} ->
         twig:log(debug,"Worker flushing doc batch of ~p docs", [Size]);
     _ ->
         ok
@@ -422,7 +422,7 @@ maybe_flush_docs(#httpdb{} = Target, Batch, Doc) ->
         end
     end;
 
-maybe_flush_docs(#db{} = Target, #batch{docs = DocAcc, size = SizeAcc}, Doc) ->
+maybe_flush_docs(#db2{} = Target, #batch{docs = DocAcc, size = SizeAcc}, Doc) ->
     case SizeAcc + 1 of
     SizeAcc2 when SizeAcc2 >= ?DOC_BUFFER_LEN ->
         twig:log(debug,"Worker flushing doc batch of ~p docs", [SizeAcc2]),

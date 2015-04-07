@@ -443,12 +443,12 @@ handle_call({report_seq_done, Seq, StatsInc}, From,
 
 
 handle_cast({db_compacted, DbName},
-    #rep_state{source = #db{name = DbName} = Source} = State) ->
+    #rep_state{source = #db2{name = DbName} = Source} = State) ->
     {ok, NewSource} = couch_db:reopen(Source),
     {noreply, State#rep_state{source = NewSource}};
 
 handle_cast({db_compacted, DbName},
-    #rep_state{target = #db{name = DbName} = Target} = State) ->
+    #rep_state{target = #db2{name = DbName} = Target} = State) ->
     {ok, NewTarget} = couch_db:reopen(Target),
     {noreply, State#rep_state{target = NewTarget}};
 
@@ -873,7 +873,7 @@ has_session_id(SessionId, [{Props} | Rest]) ->
     end.
 
 
-db_monitor(#db{} = Db) ->
+db_monitor(#db2{} = Db) ->
     couch_db:monitor(Db);
 db_monitor(_HttpDb) ->
     nil.

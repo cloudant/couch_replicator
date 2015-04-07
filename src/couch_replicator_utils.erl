@@ -351,20 +351,20 @@ ssl_verify_options(false, _OTPVersion) ->
 
 
 %% New db record has Options field removed here to enable smoother dbcore migration
-open_db(#db{name = Name, user_ctx = UserCtx}) ->
+open_db(#db2{name = Name, user_ctx = UserCtx}) ->
     {ok, Db} = couch_db:open(Name, [{user_ctx, UserCtx} | []]),
     Db;
 open_db(HttpDb) ->
     HttpDb.
 
 
-close_db(#db{} = Db) ->
+close_db(#db2{} = Db) ->
     couch_db:close(Db);
 close_db(_HttpDb) ->
     ok.
 
 
-start_db_compaction_notifier(#db{name = DbName}, Server) ->
+start_db_compaction_notifier(#db2{name = DbName}, Server) ->
     {ok, Pid} = couch_event:link_listener(
             ?MODULE, handle_db_event, Server, [{dbname, DbName}]
         ),

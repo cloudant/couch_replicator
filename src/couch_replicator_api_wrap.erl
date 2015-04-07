@@ -54,7 +54,7 @@
 db_uri(#httpdb{url = Url}) ->
     couch_util:url_strip_password(Url);
 
-db_uri(#db{name = Name}) ->
+db_uri(#db2{name = Name}) ->
     db_uri(Name);
 
 db_uri(DbName) ->
@@ -137,7 +137,7 @@ get_db_info(#httpdb{} = Db) ->
         fun(200, _, {Props}) ->
             {ok, Props}
         end);
-get_db_info(#db{name = DbName, user_ctx = UserCtx}) ->
+get_db_info(#db2{name = DbName, user_ctx = UserCtx}) ->
     {ok, Db} = couch_db:open(DbName, [{user_ctx, UserCtx}]),
     {ok, Info} = couch_db:get_db_info(Db),
     couch_db:close(Db),
@@ -160,8 +160,8 @@ get_pending_count(#httpdb{} = Db, Seq) ->
     send_req(Db, Options, fun(200, _, {Props}) ->
         {ok, couch_util:get_value(<<"pending">>, Props, null)}
     end);
-get_pending_count(#db{name=DbName}=Db, Seq) when is_number(Seq) ->
-    {ok, Db} = couch_db:open(DbName, [{user_ctx, Db#db.user_ctx}]),
+get_pending_count(#db2{name=DbName}=Db, Seq) when is_number(Seq) ->
+    {ok, Db} = couch_db:open(DbName, [{user_ctx, Db#db2.user_ctx}]),
     Pending = couch_db:count_changes_since(Db, Seq),
     couch_db:close(Db),
     {ok, Pending}.
