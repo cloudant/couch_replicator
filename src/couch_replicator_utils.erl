@@ -361,7 +361,7 @@ open_db(Db) ->
     Db.
 
 
-close(#httpdb{}) ->
+close_db(#httpdb{}) ->
     ok;
 close_db(Db) ->
     true = couch_db:is_db(Db),

@@ -443,7 +443,7 @@ handle_call({report_seq_done, Seq, StatsInc}, From,
 
 
 handle_cast({db_compacted, DbName}, State) ->
-    #state{
+    #rep_state{
         source = Source,
         target = Target
     } = State,
@@ -469,7 +469,7 @@ handle_cast({db_compacted, DbName}, State) ->
         false ->
             Target
     end,
-    {noreply, #state{
+    {noreply, #rep_state{
         source = NewSource,
         target = NewTarget
     }};

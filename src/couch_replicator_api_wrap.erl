@@ -139,13 +139,13 @@ get_db_info(#httpdb{} = Db) ->
         fun(200, _, {Props}) ->
             {ok, Props}
         end);
-get_db_info(#db2{name = DbName, user_ctx = UserCtx}) ->
+get_db_info(Db) ->
     true = couch_db:is_db(Db),
-    DbName = couch_db:name(Name),
+    DbName = couch_db:name(Db),
     UserCtx = couch_db:info(Db, user_ctx),
     {ok, TmpDb} = couch_db:open(DbName, [{user_ctx, UserCtx}]),
     try
-        {ok, Info} = couch_db:get_db_info(Db),
+        {ok, Info} = couch_db:get_db_info(TmpDb),
         {ok, [{couch_util:to_binary(K), V} || {K, V} <- Info]}
     after
         couch_db:close(Db)
@@ -174,7 +174,7 @@ get_pending_count(Db, Seq) when is_number(Seq) ->
     UserCtx = couch_db:info(Db, user_ctx),
     {ok, TmpDb} = couch_db:open(DbName, [UserCtx]),
     try
-        {ok, couch_db:count_changes_since(Db, Seq)}
+        {ok, couch_db:count_changes_since(TmpDb, Seq)}
     after
         couch_db:close(Db)
     end.

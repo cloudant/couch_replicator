@@ -77,7 +77,7 @@ start_link(Cp, Source, Target, ChangesManager, _MaxConns) ->
         erlang:put(last_stats_report, now()),
         queue_fetch_loop(Source, Target, Cp, Cp, ChangesManager)
     end),
-    {ok, Pid};
+    {ok, Pid}.
 
 
 
@@ -252,7 +252,7 @@ queue_fetch_loop(Source, Target, Parent, Cp, ChangesManager) ->
             Source2 = open_db(Source),
             Stats = local_process_batch(
                 IdRevs, Cp, Source2, Target2, #batch{}, Stats0),
-            close_db(Source2);
+            close_db(Source2)
         end,
         close_db(Target2),
         ok = gen_server:call(Cp, {report_seq_done, ReportSeq, Stats}, infinity),
