@@ -12,7 +12,7 @@
 
 -module(couch_replicator_manager).
 -behaviour(gen_server).
--vsn(1).
+-vsn(2).
 -behaviour(config_listener).
 
 % public API
@@ -68,7 +68,8 @@
     event_listener = nil,
     scan_pid = nil,
     rep_start_pids = [],
-    max_retries
+    max_retries,
+    live = []
 }).
 
 start_link() ->
@@ -129,6 +130,7 @@ handle_config_change(_, _, _, _, S) ->
 init(_) ->
     process_flag(trap_exit, true),
     net_kernel:monitor_nodes(true),
+    Live = [node() | nodes()],
     ?DOC_TO_REP = ets:new(?DOC_TO_REP, [named_table, set, public]),
     ?REP_TO_STATE = ets:new(?REP_TO_STATE, [named_table, set, public]),
     ?DB_TO_SEQ = ets:new(?DB_TO_SEQ, [named_table, set, public]),
@@ -139,7 +141,8 @@ init(_) ->
         event_listener = start_event_listener(),
         scan_pid = ScanPid,
         max_retries = retries_value(
-            config:get("replicator", "max_replication_retry_count", "10"))
+            config:get("replicator", "max_replication_retry_count", "10")),
+        live = Live
     }}.
 
 
@@ -213,11 +216,13 @@ handle_cast(Msg, State) ->
     twig:log(error, "Replication manager received unexpected cast ~p", [Msg]),
     {stop, {error, {unexpected_cast, Msg}}, State}.
 
-handle_info({nodeup, _Node}, State) ->
-    {noreply, rescan(State)};
+handle_info({nodeup, Node}, State) ->
+    Live = lists:usort([Node | State#state.live]),
+    {noreply, rescan(State#state{live=Live})};
 
-handle_info({nodedown, _Node}, State) ->
-    {noreply, rescan(State)};
+handle_info({nodedown, Node}, State) ->
+    Live = State#state.live -- [Node],
+    {noreply, rescan(State#state{live=Live})};
 
 handle_info({'EXIT', From, normal}, #state{scan_pid = From} = State) ->
     twig:log(debug, "Background scan has completed.", []),
@@ -283,6 +288,8 @@ terminate(_Reason, State) ->
     couch_event:stop_listener(Listener).
 
 
+code_change(1, State, _Extra) ->
+    {ok, erlang:append_element(State, [node() | nodes()])};
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -363,7 +370,7 @@ rescan(#state{scan_pid = ScanPid} = State) ->
 process_update(State, DbName, {Change}) ->
     {RepProps} = JsonRepDoc = get_value(doc, Change),
     DocId = get_value(<<"_id">>, RepProps),
-    case {owner(DbName, DocId), get_value(deleted, Change, false)} of
+    case {owner(DbName, DocId, State#state.live), get_value(deleted, Change, false)} of
     {_, true} ->
         rep_doc_deleted(DbName, DocId),
         State;
@@ -388,8 +395,7 @@ process_update(State, DbName, {Change}) ->
         end
     end.
 
-owner(DbName, DocId) ->
-    Live = [node()|nodes()],
+owner(DbName, DocId, Live) ->
     Nodes = lists:sort([N || #shard{node=N} <- mem3:shards(DbName, DocId),
 			     lists:member(N, Live)]),
     node() =:= hd(mem3_util:rotate_list({DbName, DocId}, Nodes)).
