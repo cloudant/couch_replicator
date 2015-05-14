@@ -17,7 +17,7 @@
 
 % public API
 -export([replication_started/1, replication_completed/2, replication_error/2]).
-
+-export([is_replicator_db/1, owner/2]).
 
 % gen_server callbacks
 -export([start_link/0, init/1, handle_call/3, handle_info/2, handle_cast/2]).
