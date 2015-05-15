@@ -17,7 +17,7 @@
 
 % public API
 -export([replication_started/1, replication_completed/2, replication_error/2]).
-
+-export([owner/1]).
 
 % gen_server callbacks
 -export([start_link/0, init/1, handle_call/3, handle_info/2, handle_cast/2]).
@@ -120,6 +120,10 @@ replication_error(#rep{id = {BaseId, _} = RepId}, Error) ->
     end.
 
 
+owner(RepId) ->
+    gen_server:call(?MODULE, {owner, RepId}).
+
+
 handle_config_change("replicator", "max_replication_retry_count", V, _, S) ->
     ok = gen_server:cast(S, {set_max_retries, retries_value(V)}),
     {ok, S};
@@ -145,6 +149,13 @@ init(_) ->
         live = Live
     }}.
 
+handle_call({owner, RepId}, _From, State) ->
+    case rep_state(RepId) of
+    nil ->
+        false;
+    #rep_state{dbname = DbName, rep = #rep{doc_id = DocId}} ->
+        {reply, owner(DbName, DocId, State#state.live), State}
+    end;
 
 handle_call({rep_db_update, DbName, {ChangeProps} = Change}, _From, State) ->
     NewState = try
@@ -374,9 +385,11 @@ process_update(State, DbName, {Change}) ->
     {_, true} ->
         rep_doc_deleted(DbName, DocId),
         State;
-    {false, false} ->
+    {Owner, false} when Owner /= node() ->
+        twig:log(notice, "Not starting '~s' as owner is ~s.", [DocId, Owner]),
         State;
-    {true, false} ->
+    {_Owner, false} ->
+        twig:log(notice, "Maybe starting '~s' as I'm the owner", [DocId]),
         case get_value(<<"_replication_state">>, RepProps) of
         undefined ->
             maybe_start_replication(State, DbName, DocId, JsonRepDoc);
@@ -398,7 +411,7 @@ process_update(State, DbName, {Change}) ->
 owner(DbName, DocId, Live) ->
     Nodes = lists:sort([N || #shard{node=N} <- mem3:shards(DbName, DocId),
 			     lists:member(N, Live)]),
-    node() =:= hd(mem3_util:rotate_list({DbName, DocId}, Nodes)).
+    hd(mem3_util:rotate_list({DbName, DocId}, Nodes)).
 
 rep_db_update_error(Error, DbName, DocId) ->
     case Error of
