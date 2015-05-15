@@ -17,7 +17,7 @@
 
 % public API
 -export([replication_started/1, replication_completed/2, replication_error/2]).
--export([owner/1]).
+-export([owner/1, replication_usurped/2]).
 
 % gen_server callbacks
 -export([start_link/0, init/1, handle_call/3, handle_info/2, handle_cast/2]).
@@ -104,6 +104,17 @@ replication_completed(#rep{id = RepId}, Stats) ->
         ok = gen_server:call(?MODULE, {rep_complete, RepId}, infinity),
         twig:log(notice, "Replication `~s` finished (triggered by document `~s`)",
             [pp_rep_id(RepId), DocId])
+    end.
+
+
+replication_usurped(#rep{id = RepId}, By) ->
+    case rep_state(RepId) of
+    nil ->
+        ok;
+    #rep_state{rep = #rep{doc_id = DocId}} ->
+        ok = gen_server:call(?MODULE, {rep_complete, RepId}, infinity),
+        twig:log(notice, "Replication `~s` usurped by ~s (triggered by document `~s`)",
+            [pp_rep_id(RepId), By, DocId])
     end.
 
 
