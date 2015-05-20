@@ -17,7 +17,7 @@
 
 % public API
 -export([replication_started/1, replication_completed/2, replication_error/2]).
--export([owner/1, replication_usurped/2]).
+-export([continue/1, replication_usurped/2]).
 
 % gen_server callbacks
 -export([start_link/0, init/1, handle_call/3, handle_info/2, handle_cast/2]).
@@ -130,9 +130,11 @@ replication_error(#rep{id = {BaseId, _} = RepId}, Error) ->
         ok = gen_server:call(?MODULE, {rep_error, RepId, Error}, infinity)
     end.
 
-
-owner(RepId) ->
-    gen_server:call(?MODULE, {owner, RepId}).
+continue(#rep{doc_id = undefined}) ->
+    {true, no_owner};
+continue(#rep{id = RepId}) ->
+    Owner = gen_server:call(?MODULE, {owner, RepId}),
+    {node() == Owner, Owner}.
 
 
 handle_config_change("replicator", "max_replication_retry_count", V, _, S) ->
@@ -160,7 +162,7 @@ init(_) ->
         live = Live
     }}.
 
-handle_call({owner, RepId}, _From, State) ->
+handle_call({continue, RepId}, _From, State) ->
     case rep_state(RepId) of
     nil ->
         {reply, false, State};
