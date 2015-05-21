@@ -163,7 +163,7 @@ init(_) ->
 handle_call({owner, RepId}, _From, State) ->
     case rep_state(RepId) of
     nil ->
-        {reply, false, State};
+        false;
     #rep_state{dbname = DbName, rep = #rep{doc_id = DocId}} ->
         {reply, owner(DbName, DocId, State#state.live), State}
     end;
