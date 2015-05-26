@@ -133,7 +133,7 @@ replication_error(#rep{id = {BaseId, _} = RepId}, Error) ->
 continue(#rep{doc_id = null}) ->
     {true, no_owner};
 continue(#rep{id = RepId}) ->
-    Owner = gen_server:call(?MODULE, {owner, RepId}),
+    Owner = gen_server:call(?MODULE, {owner, RepId}, infinity),
     {node() == Owner, Owner}.
 
 
