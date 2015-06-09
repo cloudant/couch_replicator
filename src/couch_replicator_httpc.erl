@@ -136,7 +136,7 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
             StreamDataFun = fun() ->
                 stream_data_self(HttpDb, Params, Worker, ReqId, Callback)
             end,
-            put(?STREAM_STATUS, streaming),
+            put(?STREAM_STATUS, {streaming, Worker}),
             ibrowse:stream_next(ReqId),
             try
                 Ret = Callback(Ok, Headers, StreamDataFun),
@@ -171,7 +171,7 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
 % no longer in the HTTP request.
 clean_mailbox({ibrowse_req_id, ReqId}) ->
     case get(?STREAM_STATUS) of
-        streaming ->
+        {streaming, Worker} ->
             ibrowse:stream_next(ReqId),
             receive
                 {ibrowse_async_response, ReqId, _} ->
@@ -180,6 +180,7 @@ clean_mailbox({ibrowse_req_id, ReqId}) ->
                     put(?STREAM_STATUS, ended),
                     ok
                 after 30000 ->
+                    exit(Worker, {timeout, ibrowse_stream_cleanup}),
                     exit({timeout, ibrowse_stream_cleanup})
             end;
         Status when Status == init; Status == ended ->
