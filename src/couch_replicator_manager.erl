@@ -618,6 +618,8 @@ clean_up_replications(DbName) ->
 update_rep_doc(RepDbName, RepDocId, KVs) ->
     update_rep_doc(RepDbName, RepDocId, KVs, 1).
 
+update_rep_doc(RepDbName, <<"_", _/binary>>, KVs, Wait) ->
+    ok;
 update_rep_doc(RepDbName, RepDocId, KVs, Wait) when is_binary(RepDocId) ->
     {Pid, Ref} =
     spawn_monitor(fun() ->
@@ -631,7 +633,7 @@ update_rep_doc(RepDbName, RepDocId, KVs, Wait) when is_binary(RepDocId) ->
         catch
         throw:conflict ->
             % a race condition may cause an update conflict,
-            % in which cae update_rep_doc is called again to refetch
+            % in which case update_rep_doc is called again to refetch
             twig:log(error, "Conflict error when updating replication document `~s`."
                          " Retrying.", [RepDocId]),
             ok = timer:sleep(random:uniform(erlang:min(128, Wait)) * 100),
