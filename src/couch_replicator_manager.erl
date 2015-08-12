@@ -619,6 +619,8 @@ update_rep_doc(RepDbName, RepDocId, KVs) ->
     update_rep_doc(RepDbName, RepDocId, KVs, 1).
 
 update_rep_doc(RepDbName, <<"_", _/binary>>, KVs, Wait) ->
+    % Skip the update for document ids beginning in an underscore.
+    % _design etc.
     ok;
 update_rep_doc(RepDbName, RepDocId, KVs, Wait) when is_binary(RepDocId) ->
     {Pid, Ref} =
