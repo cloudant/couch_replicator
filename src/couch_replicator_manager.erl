@@ -384,10 +384,15 @@ handle_db_event(_DbName, _Event, Server) ->
     {ok, Server}.
 
 rescan(#state{scan_pid = nil} = State) ->
-    true = ets:delete_all_objects(?DB_TO_SEQ),
-    Server = self(),
-    NewScanPid = spawn_link(fun() -> scan_all_dbs(Server) end),
-    State#state{scan_pid = NewScanPid};
+    case fabric:upgrade_in_progress() of
+        true ->
+            State;
+        false ->
+            true = ets:delete_all_objects(?DB_TO_SEQ),
+            Server = self(),
+            NewScanPid = spawn_link(fun() -> scan_all_dbs(Server) end),
+            State#state{scan_pid = NewScanPid}
+    end;
 rescan(#state{scan_pid = ScanPid} = State) ->
     unlink(ScanPid),
     exit(ScanPid, exit),
