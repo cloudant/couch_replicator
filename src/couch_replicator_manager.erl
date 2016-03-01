@@ -69,7 +69,8 @@
     scan_pid = nil,
     rep_start_pids = [],
     max_retries,
-    live = []
+    live = [],
+    epoch = nil
 }).
 
 start_link() ->
@@ -153,13 +154,15 @@ init(_) ->
     ?DB_TO_SEQ = ets:new(?DB_TO_SEQ, [named_table, set, public]),
     Server = self(),
     ok = config:listen_for_changes(?MODULE, Server),
+    Epoch = make_ref(),
     ScanPid = spawn_link(fun() -> scan_all_dbs(Server) end),
     {ok, #state{
         event_listener = start_event_listener(),
         scan_pid = ScanPid,
         max_retries = retries_value(
             config:get("replicator", "max_replication_retry_count", "10")),
-        live = Live
+        live = Live,
+        epoch = Epoch
     }}.
 
 handle_call({owner, RepId}, _From, State) ->
@@ -210,7 +213,13 @@ handle_call({resume_scan, DbName}, _From, State) ->
     {noreply, NewSt} = handle_cast({resume_scan, DbName}, State),
     {reply, ok, NewSt};
 
-handle_call({rep_db_checkpoint, DbName, EndSeq}, _From, State) ->
+% Match changes epoch with the current epoch in the state.
+% New epoch ref is created on a full rescan. Change feeds have to
+% be replayed from the start to determine ownership in the new
+% cluster configuration and epoch is used to match & checkpoint
+% only changes from the current cluster configuration.
+handle_call({rep_db_checkpoint, DbName, EndSeq, Epoch}, _From,
+            #state{epoch = Epoch} = State) ->
     Entry = case ets:lookup(?DB_TO_SEQ, DbName) of
         [] ->
             {DbName, EndSeq, false};
@@ -218,6 +227,10 @@ handle_call({rep_db_checkpoint, DbName, EndSeq}, _From, State) ->
             {DbName, EndSeq, Rescan}
     end,
     true = ets:insert(?DB_TO_SEQ, Entry),
+    {reply, ok, State};
+
+% Ignore checkpoints from previous epoch.
+handle_call({rep_db_checkpoint, _DbName, _EndSeq, _Epoch}, _From, State) ->
     {reply, ok, State};
 
 handle_call(Msg, From, State) ->
@@ -243,7 +256,7 @@ handle_cast({resume_scan, DbName}, State) ->
                 [{DbName, EndSeq, _Rescan}] -> EndSeq
             end,
             true = ets:insert(?DB_TO_SEQ, {DbName, Since, false}),
-            Pid = start_changes_reader(DbName, Since),
+            Pid = start_changes_reader(DbName, Since, State#state.epoch),
             twig:log(debug, "Scanning ~s from update_seq ~p", [DbName, Since]),
             [{DbName, Pid} | Pids]
     end,
@@ -282,7 +295,7 @@ handle_info({'EXIT', From, Reason}, #state{rep_start_pids = Pids} = State) ->
     case lists:keytake(From, 2, Pids) of
         {value, {DbName, From}, NewPids} ->
             if Reason == normal -> ok; true ->
-                Fmt = "~s : Known replication pid ~w died :: ~w",
+                Fmt = "~s : Known replication or change feed pid ~w died :: ~w",
                 twig:log(err, Fmt, [?MODULE, From, Reason])
             end,
             NewState = State#state{rep_start_pids = NewPids},
@@ -342,12 +355,12 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
-start_changes_reader(DbName, Since) ->
-    spawn_link(?MODULE, changes_reader, [self(), DbName, Since]).
+start_changes_reader(DbName, Since, Epoch) ->
+    spawn_link(?MODULE, changes_reader, [{self(), Epoch},  DbName, Since]).
 
-changes_reader(Server, DbName, Since) ->
+changes_reader({Server, Epoch}, DbName, Since) ->
     CBFun = fun ?MODULE:changes_reader_cb/2,
-    Acc = {Server, DbName},
+    Acc = {Server, DbName, Epoch},
     Args = #changes_args{
         include_docs = true,
         feed = "longpoll",
@@ -357,7 +370,7 @@ changes_reader(Server, DbName, Since) ->
     },
     fabric:changes(DbName, CBFun, Acc, Args).
 
-changes_reader_cb({change, Change}, {Server, DbName}) ->
+changes_reader_cb({change, Change}, {Server, DbName, Epoch}) ->
     case has_valid_rep_id(Change) of
         true ->
             Msg = {rep_db_update, DbName, Change},
@@ -365,11 +378,11 @@ changes_reader_cb({change, Change}, {Server, DbName}) ->
         false ->
             ok
     end,
-    {ok, {Server, DbName}};
-changes_reader_cb({stop, EndSeq, _Pending}, {Server, DbName}) ->
-    Msg = {rep_db_checkpoint, DbName, EndSeq},
+    {ok, {Server, DbName, Epoch}};
+changes_reader_cb({stop, EndSeq, _Pending}, {Server, DbName, Epoch}) ->
+    Msg = {rep_db_checkpoint, DbName, EndSeq, Epoch},
     ok = gen_server:call(Server, Msg, infinity),
-    {ok, {Server, DbName}};
+    {ok, {Server, DbName, Epoch}};
 changes_reader_cb(_, Acc) ->
     {ok, Acc}.
 
@@ -412,8 +425,9 @@ rescan(#state{scan_pid = nil} = State) ->
         false ->
             true = ets:delete_all_objects(?DB_TO_SEQ),
             Server = self(),
+            Epoch = make_ref(),
             NewScanPid = spawn_link(fun() -> scan_all_dbs(Server) end),
-            State#state{scan_pid = NewScanPid}
+            State#state{scan_pid = NewScanPid, epoch = Epoch}
     end;
 rescan(#state{scan_pid = ScanPid} = State) ->
     unlink(ScanPid),
