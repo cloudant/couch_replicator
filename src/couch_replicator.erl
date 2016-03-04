@@ -262,9 +262,7 @@ do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
     % This starts the worker processes. They ask the changes queue manager for a
     % a batch of _changes rows to process -> check which revs are missing in the
     % target, and for the missing ones, it copies them from the source to the target.
-    MaxConnsOption = get_value(http_connections, Options),
-    % Adjust minimum number of https source connections to 2 to avoid deadlock
-    MaxConns = adjust_maxconn(MaxConnsOption, Source, BaseId),
+    MaxConns = get_value(http_connections, Options),
     Workers = lists:map(
         fun(_) ->
             couch_stats:increment_counter([couch_replicator, workers_started]),
@@ -334,13 +332,6 @@ do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
         }
     }.
 
-adjust_maxconn(1, #httpdb{}, RepId) ->
-    Msg = "Adjusting minimum number of ~p HTTP source connections to 2",
-    twig:log(notice, Msg, [RepId]),
-    2;
-
-adjust_maxconn(Conns, _Source, _RepId) ->
-    Conns.
 
 handle_info({'DOWN', Ref, _, _, Why}, #rep_state{source_monitor = Ref} = St) ->
     twig:log(error,"Source database is down. Reason: ~p", [Why]),
