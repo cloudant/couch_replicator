@@ -27,6 +27,8 @@
 
 -define(LOWEST_SEQ, 0).
 
+-define(DEFAULT_CHECKPOINT_INTERVAL, 30000).
+
 -include_lib("couch/include/couch_db.hrl").
 -include("couch_replicator_api_wrap.hrl").
 -include("couch_replicator.hrl").
@@ -73,7 +75,7 @@
     target_monitor = nil,
     source_seq = nil,
     use_checkpoints = true,
-    checkpoint_interval = 5000
+    checkpoint_interval = ?DEFAULT_CHECKPOINT_INTERVAL
 }).
 
 
@@ -612,7 +614,7 @@ init_state(Rep) ->
         source_monitor = db_monitor(Source),
         target_monitor = db_monitor(Target),
         use_checkpoints = get_value(use_checkpoints, Options, true),
-        checkpoint_interval = get_value(checkpoint_interval, Options, 5000)
+        checkpoint_interval = get_value(checkpoint_interval, Options, ?DEFAULT_CHECKPOINT_INTERVAL)
     },
     State#rep_state{timer = start_timer(State)}.
 
