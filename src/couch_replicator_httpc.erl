@@ -208,16 +208,12 @@ clean_mailbox(_ReqId, 0) ->
 clean_mailbox({ibrowse_req_id, ReqId}, Count) when Count > 0 ->
     case get(?STREAM_STATUS) of
         {streaming, Worker} ->
-            ibrowse:stream_next(ReqId),
-            receive
-                {ibrowse_async_response, ReqId, _} ->
-                    clean_mailbox({ibrowse_req_id, ReqId}, Count - 1);
-                {ibrowse_async_response_end, ReqId} ->
+            case is_process_alive(Worker) of
+                true ->
+                    discard_message(ReqId, Worker, Count);
+                false ->
                     put(?STREAM_STATUS, ended),
                     ok
-                after 30000 ->
-                    exit(Worker, {timeout, ibrowse_stream_cleanup}),
-                    exit({timeout, ibrowse_stream_cleanup})
             end;
         Status when Status == init; Status == ended ->
             receive
@@ -232,6 +228,20 @@ clean_mailbox({ibrowse_req_id, ReqId}, Count) when Count > 0 ->
     end;
 clean_mailbox(_, Count) when Count > 0 ->
     ok.
+
+
+discard_message(ReqId, Worker, Count) ->
+    ibrowse:stream_next(ReqId),
+    receive
+        {ibrowse_async_response, ReqId, _} ->
+            clean_mailbox({ibrowse_req_id, ReqId}, Count - 1);
+        {ibrowse_async_response_end, ReqId} ->
+            put(?STREAM_STATUS, ended),
+            ok
+    after 30000 ->
+        exit(Worker, {timeout, ibrowse_stream_cleanup}),
+        exit({timeout, ibrowse_stream_cleanup})
+    end.
 
 
 %% For 429 errors, we perform an exponential backoff up to 2.17 hours.
