@@ -47,9 +47,14 @@ read_changes(Parent, StartSeq, Db, ChangesQueue, Options, Ts) ->
     catch
         throw:recurse ->
             LS = get(last_seq),
-            ?MODULE:read_changes(Parent, LS, Db, ChangesQueue, Options, Ts+1);
-        exit:{http_request_failed, _, _, _} = Error ->
-        couch_stats:increment_counter([couch_replicator, changes_read_failures]),
+            read_changes(Parent, LS, Db, ChangesQueue, Options, Ts+1);
+        throw:retry_no_limit ->
+            LS = get(last_seq),
+            read_changes(Parent, LS, Db, ChangesQueue, Options, Ts);
+        throw:{retry_limit, Error} ->
+        couch_stats:increment_counter(
+            [couch_replicator, changes_read_failures]
+        ),
         case get(retries_left) of
         N when N > 0 ->
             put(retries_left, N - 1),

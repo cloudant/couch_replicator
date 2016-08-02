@@ -160,6 +160,9 @@ process_stream_response(ReqId, Worker, HttpDb, Params, Callback) ->
                 Ret = Callback(Ok, Headers, StreamDataFun),
                 Ret
             catch
+                throw:{maybe_retry_req, connection_closed} ->
+                    maybe_retry({connection_closed, mid_stream},
+                        Worker, HttpDb, Params);
                 throw:{maybe_retry_req, Err} ->
                     maybe_retry(Err, Worker, HttpDb, Params)
             end;
@@ -208,16 +211,12 @@ clean_mailbox(_ReqId, 0) ->
 clean_mailbox({ibrowse_req_id, ReqId}, Count) when Count > 0 ->
     case get(?STREAM_STATUS) of
         {streaming, Worker} ->
-            ibrowse:stream_next(ReqId),
-            receive
-                {ibrowse_async_response, ReqId, _} ->
-                    clean_mailbox({ibrowse_req_id, ReqId}, Count - 1);
-                {ibrowse_async_response_end, ReqId} ->
+            case is_process_alive(Worker) of
+                true ->
+                    discard_message(ReqId, Worker, Count);
+                false ->
                     put(?STREAM_STATUS, ended),
                     ok
-                after 30000 ->
-                    exit(Worker, {timeout, ibrowse_stream_cleanup}),
-                    exit({timeout, ibrowse_stream_cleanup})
             end;
         Status when Status == init; Status == ended ->
             receive
@@ -234,6 +233,20 @@ clean_mailbox(_, Count) when Count > 0 ->
     ok.
 
 
+discard_message(ReqId, Worker, Count) ->
+    ibrowse:stream_next(ReqId),
+    receive
+        {ibrowse_async_response, ReqId, _} ->
+            clean_mailbox({ibrowse_req_id, ReqId}, Count - 1);
+        {ibrowse_async_response_end, ReqId} ->
+            put(?STREAM_STATUS, ended),
+            ok
+    after 30000 ->
+        exit(Worker, {timeout, ibrowse_stream_cleanup}),
+        exit({timeout, ibrowse_stream_cleanup})
+    end.
+
+
 %% For 429 errors, we perform an exponential backoff up to 2.17 hours.
 %% We use Backoff time as a timeout/failure end.
 backoff(Worker, #httpdb{backoff = Backoff} = HttpDb, Params) ->
@@ -242,12 +255,12 @@ backoff(Worker, #httpdb{backoff = Backoff} = HttpDb, Params) ->
     NewBackoff = erlang:min(Backoff2, ?MAX_BACKOFF_WAIT),
     NewHttpDb = HttpDb#httpdb{backoff = NewBackoff},
     case Backoff2 of
-        W0 when W0 >= ?MAX_BACKOFF_LOG_THRESHOLD -> % Past 8 min, we log retries
+        W0 when W0 > ?MAX_BACKOFF_WAIT ->
+            report_error(Worker, HttpDb, Params, {error,
+                "Long 429-induced Retry Time Out"});
+        W1 when W1 >= ?MAX_BACKOFF_LOG_THRESHOLD -> % Past 8 min, we log retries
             log_retry_error(Params, HttpDb, Backoff2, "429 Retry"),
             throw({retry, NewHttpDb, Params});
-        W1 when W1 > ?MAX_BACKOFF_WAIT ->
-            report_error(Worker, HttpDb, Params, {error,
-                "429 Retry Timeout"});
         _ ->
             throw({retry, NewHttpDb, Params})
     end.
