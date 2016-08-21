@@ -12,7 +12,7 @@
 
 -module(couch_replicator).
 -behaviour(gen_server).
--vsn(1).
+-vsn(2).
 
 % public API
 -export([replicate/2]).
@@ -574,13 +574,18 @@ cancel_timer(#rep_state{timer = Timer} = State) ->
 init_state(Rep) ->
     #rep{
         id = {BaseId, _Ext},
-        source = Src0, target = Tgt,
+        source = Src0, target = Tgt0,
         options = Options, user_ctx = UserCtx
     } = Rep,
+    ModInfo = ?MODULE:module_info(),
+    twig:log(error, "After do_init Upgrade HttpDb init_state ~p", [ModInfo]),
+    Src1 = couch_replicator_api_wrap:upgrade_httpdb(Src0),
+    Tgt1 = couch_replicator_api_wrap:upgrade_httpdb(Tgt0),
+
     % Adjust minimum number of http source connections to 2 to avoid deadlock
-    Src = adjust_maxconn(Src0, BaseId),
+    Src = adjust_maxconn(Src1, BaseId),
     {ok, Source} = couch_replicator_api_wrap:db_open(Src, [{user_ctx, UserCtx}]),
-    {ok, Target} = couch_replicator_api_wrap:db_open(Tgt, [{user_ctx, UserCtx}],
+    {ok, Target} = couch_replicator_api_wrap:db_open(Tgt1, [{user_ctx, UserCtx}],
         get_value(create_target, Options, false)),
 
     {ok, SourceInfo} = couch_replicator_api_wrap:get_db_info(Source),
@@ -808,9 +813,13 @@ update_checkpoint(Db, #doc{id = LogId, body = LogBody} = Doc) ->
 commit_to_both(Source, Target) ->
     % commit the src async
     ParentPid = self(),
+    ModInfo0 = ?MODULE:module_info(),
+    twig:log(error, "Before Upgrade HttpDb commit_to_both ~p", [ModInfo0]),
+
     SrcCommitPid = spawn_link(
         fun() ->
-            twig:log(error, "Upgrade HttpDb"),
+            ModInfo = ?MODULE:module_info(),
+            twig:log(error, "After Upgrade HttpDb commit_to_both ~p", [ModInfo]),
             Src2 = couch_replicator_api_wrap:upgrade_httpdb(Source),
             Result = (catch couch_replicator_api_wrap:ensure_full_commit(Src2)),
             ParentPid ! {self(), Result}

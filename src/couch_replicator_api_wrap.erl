@@ -226,6 +226,8 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
                 fun mp_parse_mixed/1
             )
         end,
+        ModInfo0 = ?MODULE:module_info(),
+        twig:log(error, "Before Upgrade Httpdb open_doc_revs ~p", [ModInfo0]),
         Streamer = spawn_link(fun() ->
             Params = [
                 {path, Path},
@@ -233,11 +235,12 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
                 {ibrowse_options, [{stream_to, {self(), once}}]},
                 {headers, [{"Accept", "multipart/mixed"}]}
             ],
+            ModInfo = ?MODULE:module_info(),
             % We're setting retries to 0 here to avoid the case where the
             % Streamer retries the request and ends up jumbling together two
             % different response bodies.  Retries are handled explicitly by
             % open_doc_revs itself.
-            twig:log(error, "Upgrade Httpdb"),
+            twig:log(error, "After Upgrade Httpdb open_doc_revs ~p", [ModInfo]),
             HttpDb2 = couch_replicator_api_wrap:upgrade_httpdb(HttpDb#httpdb{retries = 0}),
             send_req(HttpDb2, Params, Callback)
         end),

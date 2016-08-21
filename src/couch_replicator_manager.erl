@@ -529,6 +529,8 @@ maybe_start_replication(State, DbName, DocId, RepDoc) ->
         DelaySecs = StartDelaySecs + random:uniform(StartSplaySecs),
         twig:log(notice, "Delaying replication `~s` start by ~p seconds.",
             [pp_rep_id(RepId), DelaySecs]),
+        ModInfo0 = ?MODULE:module_info(),
+        twig:log(error, "Before Upgrade Httpdb starting ~p", [ModInfo0]),
         Pid = spawn_link(?MODULE, start_replication, [Rep, DelaySecs]),
         State#state{
             rep_start_pids = [{rep_start, Pid} | State#state.rep_start_pids]

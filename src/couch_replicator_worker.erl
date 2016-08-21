@@ -287,8 +287,11 @@ remote_process_batch([{Id, Revs, PAs} | Rest], Parent) ->
 
 spawn_doc_reader(Source, Target, FetchParams) ->
     Parent = self(),
+    ModInfo0 = ?MODULE:module_info(),
+    twig:log(error, "Before Upgrade Httpdb spawn_doc_reader ~p", [ModInfo0]),
     spawn_link(fun() ->
-        twig:log(notice, "Upgrade Httpdb"),
+        ModInfo = ?MODULE:module_info(),
+        twig:log(notice, "After Upgrade Httpdb spawn_doc_reader~p", [ModInfo]),
         Src = couch_replicator_api_wrap:upgrade_httpdb(Source),
         Source2 = open_db(Src),
         fetch_doc(
@@ -373,9 +376,12 @@ spawn_writer(Target, #batch{docs = DocList, size = Size}) ->
         ok
     end,
     Parent = self(),
+    ModInfo0 = ?MODULE:module_info(),
+    twig:log(error, "Before Upgrade Httpdb spawn_writer ~p", [ModInfo0]),
     spawn_link(
         fun() ->
-            twig:log(error, "Upgrade Httpdb"),
+            ModInfo = ?MODULE:module_info(),
+            twig:log(error, "After Upgrade Httpdb spawn_writer ~p", [ModInfo]),
             Trg2 = couch_replicator_api_wrap:upgrade_httpdb(Target),
             Target2 = open_db(Trg2),
             Stats = flush_docs(Target2, DocList),
