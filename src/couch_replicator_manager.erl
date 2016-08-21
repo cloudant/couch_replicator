@@ -12,7 +12,7 @@
 
 -module(couch_replicator_manager).
 -behaviour(gen_server).
--vsn(2).
+-vsn(3).
 -behaviour(config_listener).
 
 % public API
@@ -529,6 +529,10 @@ maybe_start_replication(State, DbName, DocId, RepDoc) ->
         DelaySecs = StartDelaySecs + random:uniform(StartSplaySecs),
         twig:log(notice, "Delaying replication `~s` start by ~p seconds.",
             [pp_rep_id(RepId), DelaySecs]),
+        Src = Rep#rep.source,
+        Target = Rep#rep.target,
+        ModInfo = ?MODULE:module_info(),
+        twig:log(notice, "Before spawn_link ModInfo ~p Rep Src ~p, Rep Target ~p ", [ModInfo, Src, Target]),
         Pid = spawn_link(?MODULE, start_replication, [Rep, DelaySecs]),
         State#state{
             rep_start_pids = [{rep_start, Pid} | State#state.rep_start_pids]
@@ -570,6 +574,9 @@ maybe_tag_rep_doc(DbName, DocId, {RepProps}, RepId) ->
 
 %% note to self: this is markedly diff from mem3_rep_manager
 start_replication(Rep, Wait) ->
+    Src = Rep#rep.source,
+    ModInfo = ?MODULE:module_info(),
+    twig:log(notice, "After spawn_link ModInfo ~p Rep Src ~p", [ModInfo, Src]),
     ok = timer:sleep(Wait * 1000),
     case (catch couch_replicator:async_replicate(Rep)) of
     {ok, _} ->

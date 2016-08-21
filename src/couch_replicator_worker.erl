@@ -12,7 +12,7 @@
 
 -module(couch_replicator_worker).
 -behaviour(gen_server).
--vsn(1).
+-vsn(2).
 
 % public API
 -export([start_link/5]).
@@ -366,8 +366,15 @@ spawn_writer(Target, #batch{docs = DocList, size = Size}) ->
         ok
     end,
     Parent = self(),
+
+    ModInfo = ?MODULE:module_info(),
+    twig:log(notice, "Before spawn_link ModInfo ~p, Target ~p", [ModInfo, Target]),
+
     spawn_link(
         fun() ->
+            ModInfo2 = ?MODULE:module_info(),
+            NewHttpdb = #httpdb{},
+            twig:log(notice, "After spawn_link ModInfo2 ~p, Target ~p, NewHttpdb ~p", [ModInfo2, Target, NewHttpdb]),
             Target2 = open_db(Target),
             Stats = flush_docs(Target2, DocList),
             close_db(Target2),
