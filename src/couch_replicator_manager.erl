@@ -575,8 +575,8 @@ start_replication(Rep, Wait) ->
     ModInfo = ?MODULE:module_info(),
     twig:log(error, "After spawn_link ModInfo ~p Rep Src ~p", [ModInfo, Src1]),
     ok = timer:sleep(Wait * 1000),
-    Src2 = couch_replicator_api_warp:upgrade_httpdb(Src1),
-    Trg2 = couch_replicator_api_warp:upgrade_httpdb(Trg1),
+    Src2 = couch_replicator_api_wrap:upgrade_httpdb(Src1),
+    Trg2 = couch_replicator_api_wrap:upgrade_httpdb(Trg1),
     Rep2 = Rep#rep{source = Src2, target = Trg2},
     case (catch couch_replicator:async_replicate(Rep2))of
         {ok, _} ->
