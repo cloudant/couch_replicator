@@ -36,7 +36,8 @@
     open_doc/3,
     open_doc_revs/6,
     changes_since/5,
-    db_uri/1
+    db_uri/1,
+    upgrade_httpdb/1
     ]).
 
 -import(couch_replicator_httpc, [
@@ -944,3 +945,18 @@ header_value(Key, Headers, Default) ->
         _ ->
             Default
     end.
+
+upgrade_httpdb(Current) when is_record(Current, httpdb) ->
+    Current;
+upgrade_httpdb(Old) when is_tuple(Old) ->
+    NewSize = record_info(size, httpdb),
+    if tuple_size(Old) < NewSize -> ok; true ->
+        erlang:error({invalid_header_size, Old})
+    end,
+    {_, New} = lists:foldl(fun(Val, {Idx, Hdr}) ->
+        {Idx+1, setelement(Idx, Hdr, Val)}
+    end, {1, #httpdb{}}, tuple_to_list(Old)),
+    if is_record(New, httpdb) -> ok; true ->
+        erlang:error({invalid_header_extension, {Old, New}})
+    end,
+    New.
