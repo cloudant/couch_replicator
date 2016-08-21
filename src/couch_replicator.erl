@@ -487,6 +487,12 @@ handle_cast({report_seq, Seq},
     {noreply, State#rep_state{seqs_in_progress = NewSeqsInProgress}}.
 
 
+code_change(2, #rep_state{source=Src, target=Tgt}=State, _Extra) ->
+    twig:log(error, "Before upgrade in code_change ~p", [Src]),
+    Source = couch_replicator_api_wrap:upgrade_httpdb(Src),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Tgt),
+    twig:log(error, "After upgrade in code_change ~p", [Source]),
+    {ok, State#rep_state{source=Source, target=Target}};
 code_change(_OldVsn, #rep_state{}=State, _Extra) ->
     {ok, State}.
 
@@ -574,18 +580,15 @@ cancel_timer(#rep_state{timer = Timer} = State) ->
 init_state(Rep) ->
     #rep{
         id = {BaseId, _Ext},
-        source = Src0, target = Tgt0,
+        source = Src0, target = Tgt,
         options = Options, user_ctx = UserCtx
     } = Rep,
-    ModInfo = ?MODULE:module_info(),
-    twig:log(error, "After do_init Upgrade HttpDb init_state ~p", [ModInfo]),
-    Src1 = couch_replicator_api_wrap:upgrade_httpdb(Src0),
-    Tgt1 = couch_replicator_api_wrap:upgrade_httpdb(Tgt0),
 
+    twig:log(error, "Src0 ~p", [Src0]),
     % Adjust minimum number of http source connections to 2 to avoid deadlock
-    Src = adjust_maxconn(Src1, BaseId),
+    Src = adjust_maxconn(Src0, BaseId),
     {ok, Source} = couch_replicator_api_wrap:db_open(Src, [{user_ctx, UserCtx}]),
-    {ok, Target} = couch_replicator_api_wrap:db_open(Tgt1, [{user_ctx, UserCtx}],
+    {ok, Target} = couch_replicator_api_wrap:db_open(Tgt, [{user_ctx, UserCtx}],
         get_value(create_target, Options, false)),
 
     {ok, SourceInfo} = couch_replicator_api_wrap:get_db_info(Source),
