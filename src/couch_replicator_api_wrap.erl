@@ -237,7 +237,9 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
             % Streamer retries the request and ends up jumbling together two
             % different response bodies.  Retries are handled explicitly by
             % open_doc_revs itself.
-            send_req(HttpDb#httpdb{retries = 0}, Params, Callback)
+            twig:log(error, "Upgrade Httpdb"),
+            HttpDb2 = couch_replicator_api_wrap:upgrade_httpdb(HttpDb#httpdb{retries = 0}),
+            send_req(HttpDb2, Params, Callback)
         end),
         % If this process dies normally we can leave
         % the Streamer process hanging around keeping an

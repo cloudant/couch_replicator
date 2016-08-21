@@ -27,7 +27,9 @@ start_link(StartSeq, #httpdb{} = Db, ChangesQueue, Options) ->
     {ok, spawn_link(fun() ->
         put(last_seq, StartSeq),
         put(retries_left, Db#httpdb.retries),
-        ?MODULE:read_changes(Parent, StartSeq, Db#httpdb{retries = 0},
+        twig:log(error, "Upgrading Httpdb"),
+        Db2 = couch_replicator_api_wrap:upgrade_httpdb(Db#httpdb{retries = 0}),
+        ?MODULE:read_changes(Parent, StartSeq, Db2,
             ChangesQueue, Options, 1)
     end)};
 start_link(StartSeq, Db, ChangesQueue, Options) ->

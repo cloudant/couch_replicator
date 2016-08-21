@@ -70,6 +70,8 @@
 start_link(Cp, #db{} = Source, Target, ChangesManager, _MaxConns) ->
     Pid = spawn_link(fun() ->
         erlang:put(last_stats_report, now()),
+        twig:log(error, "Upgrading Httpdb"),
+
         queue_fetch_loop(Source, Target, Cp, Cp, ChangesManager)
     end),
     {ok, Pid};
@@ -83,7 +85,10 @@ init({Cp, Source, Target, ChangesManager, MaxConns}) ->
     process_flag(trap_exit, true),
     Parent = self(),
     LoopPid = spawn_link(fun() ->
-        queue_fetch_loop(Source, Target, Parent, Cp, ChangesManager)
+        twig:log(error, "Upgrading Httpdb"),
+        Src2 = couch_replicator_api_wrap:upgrade_httpdb(Source),
+        Trg2 = couch_replicator_api_wrap:upgrade_httpdb(Target),
+        queue_fetch_loop(Src2, Trg2, Parent, Cp, ChangesManager)
     end),
     erlang:put(last_stats_report, now()),
     State = #state{
@@ -283,7 +288,9 @@ remote_process_batch([{Id, Revs, PAs} | Rest], Parent) ->
 spawn_doc_reader(Source, Target, FetchParams) ->
     Parent = self(),
     spawn_link(fun() ->
-        Source2 = open_db(Source),
+        twig:log(notice, "Upgrade Httpdb"),
+        Src = couch_replicator_api_wrap:upgrade_httpdb(Source),
+        Source2 = open_db(Src),
         fetch_doc(
             Source2, FetchParams, fun remote_doc_handler/2, {Parent, Target}),
         close_db(Source2)
@@ -368,7 +375,9 @@ spawn_writer(Target, #batch{docs = DocList, size = Size}) ->
     Parent = self(),
     spawn_link(
         fun() ->
-            Target2 = open_db(Target),
+            twig:log(error, "Upgrade Httpdb"),
+            Trg2 = couch_replicator_api_wrap:upgrade_httpdb(Target),
+            Target2 = open_db(Trg2),
             Stats = flush_docs(Target2, DocList),
             close_db(Target2),
             ok = gen_server:call(Parent, {add_stats, Stats}, infinity)

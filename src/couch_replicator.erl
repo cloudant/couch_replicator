@@ -810,7 +810,9 @@ commit_to_both(Source, Target) ->
     ParentPid = self(),
     SrcCommitPid = spawn_link(
         fun() ->
-            Result = (catch couch_replicator_api_wrap:ensure_full_commit(Source)),
+            twig:log(error, "Upgrade HttpDb"),
+            Src2 = couch_replicator_api_wrap:upgrade_httpdb(Source),
+            Result = (catch couch_replicator_api_wrap:ensure_full_commit(Src2)),
             ParentPid ! {self(), Result}
         end),
 
