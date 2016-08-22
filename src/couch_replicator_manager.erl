@@ -37,6 +37,7 @@
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include("couch_replicator.hrl").
+-include("couch_replicator_api_wrap.hrl").
 
 -define(DOC_TO_REP, couch_rep_doc_id_to_rep_id).
 -define(REP_TO_STATE, couch_rep_id_to_rep_state).
@@ -518,6 +519,7 @@ maybe_start_replication(State, DbName, DocId, RepDoc) ->
             retries_left = State#state.max_retries,
             max_retries = State#state.max_retries
         },
+
         true = ets:insert(?REP_TO_STATE, {RepId, RepState}),
         true = ets:insert(?DOC_TO_REP, {{DbName, DocId}, RepId}),
         twig:log(notice,"Attempting to start replication `~s` (document `~s`).",
@@ -762,8 +764,23 @@ pp_rep_id({Base, Extension}) ->
 
 rep_state(RepId) ->
     case ets:lookup(?REP_TO_STATE, RepId) of
-    [{RepId, RepState}] ->
-        RepState;
+    [{RepId, #rep_state{rep = Rep} = RepState}] ->
+        Src0 = Rep#rep.source,
+        Tgt0 = Rep#rep.target,
+
+        Check1 = is_record(Src0, httpdb),
+        Check2 = is_record(Tgt0, httpdb),
+
+        case {Check1, Check2} of
+            {true, true} ->
+                ok;
+            _ ->
+                twig:log(error, "Lookup returned old tuple Src0 ~p Tgt0~p", [Src0, Tgt0])
+        end,
+        Src1 = couch_replicator_api_wrap:upgrade_httpdb(Src0),
+        Tgt1 = couch_replicator_api_wrap:upgrade_httpdb(Tgt0),
+        Rep2 = Rep#rep{source=Src1, target=Tgt1},
+        RepState#rep_state{rep=Rep2};
     [] ->
         nil
     end.
