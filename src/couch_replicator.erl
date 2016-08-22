@@ -692,8 +692,8 @@ do_checkpoint(State) ->
     #rep_state{
         source_name=SourceName,
         target_name=TargetName,
-        source = Source,
-        target = Target,
+        source = Source0,
+        target = Target0,
         history = OldHistory,
         start_seq = {_, StartSeq},
         current_through_seq = {_Ts, NewSeq} = NewTsSeq,
@@ -706,6 +706,10 @@ do_checkpoint(State) ->
         rep_details = #rep{options = Options},
         session_id = SessionId
     } = State,
+
+    twig:log(error, "Before Upgrade commit_to_both ~p", [Source0, Target0]),
+    Source = couch_replicator_api_wrap:upgrade_httpdb(Source0),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     case commit_to_both(Source, Target) of
     {source_error, Reason} ->
          {checkpoint_commit_failure,
@@ -821,15 +825,9 @@ update_checkpoint(Db, #doc{id = LogId, body = LogBody} = Doc) ->
 commit_to_both(Source, Target) ->
     % commit the src async
     ParentPid = self(),
-    ModInfo0 = ?MODULE:module_info(),
-    twig:log(error, "Before Upgrade HttpDb commit_to_both ~p", [ModInfo0]),
-
     SrcCommitPid = spawn_link(
         fun() ->
-            ModInfo = ?MODULE:module_info(),
-            twig:log(error, "After Upgrade HttpDb commit_to_both ~p", [ModInfo]),
-            Src2 = couch_replicator_api_wrap:upgrade_httpdb(Source),
-            Result = (catch couch_replicator_api_wrap:ensure_full_commit(Src2)),
+            Result = (catch couch_replicator_api_wrap:ensure_full_commit(Source)),
             ParentPid ! {self(), Result}
         end),
 
@@ -966,11 +964,18 @@ update_task(State) ->
     ]).
 
 
-rep_stats(State) ->
+rep_stats(State0) ->
     #rep_state{
         committed_seq = {_, CommittedSeq},
-        stats = Stats
-    } = State,
+        stats = Stats,
+        source = Source0,
+        target = Target0
+    } = State0,
+    twig:log(error, "Before Upgrade rep_stats Source ~p Target ~p", [Source0, Target0]),
+    Source = couch_replicator_api_wrap:upgrade_httpdb(Source0),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
+
+    State = State0#rep_state{source=Source, target=Target},
     [
         {revisions_checked, couch_replicator_stats:missing_checked(Stats)},
         {missing_revisions_found, couch_replicator_stats:missing_found(Stats)},
