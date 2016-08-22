@@ -48,10 +48,12 @@ read_changes(Parent, StartSeq, Db, ChangesQueue, Options, Ts) ->
     catch
         throw:recurse ->
             LS = get(last_seq),
-            read_changes(Parent, LS, Db, ChangesQueue, Options, Ts+1);
+            Db2 =couch_replicator_api_wrap:upgrade_httpdb(Db),
+            ?MODULE:read_changes(Parent, LS, Db2, ChangesQueue, Options, Ts+1);
         throw:retry_no_limit ->
             LS = get(last_seq),
-            read_changes(Parent, LS, Db, ChangesQueue, Options, Ts);
+            Db2 =couch_replicator_api_wrap:upgrade_httpdb(Db),
+            ?MODULE:read_changes(Parent, LS, Db2, ChangesQueue, Options, Ts);
         throw:{retry_limit, Error} ->
         couch_stats:increment_counter(
             [couch_replicator, changes_read_failures]
