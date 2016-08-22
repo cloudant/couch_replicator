@@ -707,7 +707,7 @@ do_checkpoint(State) ->
         session_id = SessionId
     } = State,
 
-    twig:log(error, "Before Upgrade commit_to_both ~p", [Source0, Target0]),
+    twig:log(error, "Before Upgrade commit_to_both Source ~p Target ~p", [Source0, Target0]),
     Source = couch_replicator_api_wrap:upgrade_httpdb(Source0),
     Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     case commit_to_both(Source, Target) of
