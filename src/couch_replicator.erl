@@ -112,10 +112,13 @@ do_replication_loop(#rep{id = {BaseId, Ext} = Id, options = Options} = Rep) ->
     end.
 
 
-async_replicate(#rep{id = {BaseId, Ext}, source = Src, target = Tgt} = Rep) ->
+async_replicate(#rep{id = {BaseId, Ext}, source = Src, target = Tgt} = Rep0) ->
     RepChildId = BaseId ++ Ext,
-    Source = couch_replicator_api_wrap:db_uri(Src),
-    Target = couch_replicator_api_wrap:db_uri(Tgt),
+    Src2 = couch_replicator_api_wrap:upgrade_httpdb(Src),
+    Tgt2 = couch_replicator_api_wrap:upgrade_httpdb(Tgt),
+    Source = couch_replicator_api_wrap:db_uri(Src2),
+    Target = couch_replicator_api_wrap:db_uri(Tgt2),
+    Rep = Rep0#rep{source=Src2, target=Tgt2},
     Timeout = get_value(connection_timeout, Rep#rep.options),
     ChildSpec = {
         RepChildId,
@@ -239,8 +242,8 @@ do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
     random:seed(os:timestamp()),
 
     #rep_state{
-        source = Source,
-        target = Target,
+        source = Source0,
+        target = Target0,
         source_name = SourceName,
         target_name = TargetName,
         start_seq = {_Ts, StartSeq},
@@ -257,6 +260,9 @@ do_init(#rep{options = Options, id = {BaseId, Ext}, user_ctx=UserCtx} = Rep) ->
     ]),
     % This starts the _changes reader process. It adds the changes from
     % the source db to the ChangesQueue.
+    twig:log(error, "PreUpgrade DO_Init Source ~p Target ~p", [Source0, Target0]),
+    Source = couch_replicator_api_wrap:upgrade_httpdb(Source0),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     {ok, ChangesReader} = couch_replicator_changes_reader:start_link(
         StartSeq, Source, ChangesQueue, Options
     ),
@@ -487,12 +493,6 @@ handle_cast({report_seq, Seq},
     {noreply, State#rep_state{seqs_in_progress = NewSeqsInProgress}}.
 
 
-code_change(2, #rep_state{source=Src, target=Tgt}=State, _Extra) ->
-    twig:log(error, "Before upgrade in code_change ~p", [Src]),
-    Source = couch_replicator_api_wrap:upgrade_httpdb(Src),
-    Target = couch_replicator_api_wrap:upgrade_httpdb(Tgt),
-    twig:log(error, "After upgrade in code_change ~p", [Source]),
-    {ok, State#rep_state{source=Source, target=Target}};
 code_change(_OldVsn, #rep_state{}=State, _Extra) ->
     {ok, State}.
 
@@ -580,15 +580,20 @@ cancel_timer(#rep_state{timer = Timer} = State) ->
 init_state(Rep) ->
     #rep{
         id = {BaseId, _Ext},
-        source = Src0, target = Tgt,
+        source = Src0, target = Tgt0,
         options = Options, user_ctx = UserCtx
     } = Rep,
-
-    twig:log(error, "Src0 ~p", [Src0]),
+    Sample = #httpdb{},
+    twig:log(error, "Sample Httpdb~p", [Sample]),
+    Src1 = couch_replicator_api_wrap:upgrade_httpdb(Src0),
+    Tgt1 = couch_replicator_api_wrap:upgrade_httpdb(Tgt0),
+    
     % Adjust minimum number of http source connections to 2 to avoid deadlock
-    Src = adjust_maxconn(Src0, BaseId),
+    Src = adjust_maxconn(Src1, BaseId),
+
+    twig:log(error, "New Src init_state Src~p", [Src]),
     {ok, Source} = couch_replicator_api_wrap:db_open(Src, [{user_ctx, UserCtx}]),
-    {ok, Target} = couch_replicator_api_wrap:db_open(Tgt, [{user_ctx, UserCtx}],
+    {ok, Target} = couch_replicator_api_wrap:db_open(Tgt1, [{user_ctx, UserCtx}],
         get_value(create_target, Options, false)),
 
     {ok, SourceInfo} = couch_replicator_api_wrap:get_db_info(Source),

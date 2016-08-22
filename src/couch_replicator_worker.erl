@@ -70,8 +70,6 @@
 start_link(Cp, #db{} = Source, Target, ChangesManager, _MaxConns) ->
     Pid = spawn_link(fun() ->
         erlang:put(last_stats_report, now()),
-        twig:log(error, "Upgrading Httpdb"),
-
         queue_fetch_loop(Source, Target, Cp, Cp, ChangesManager)
     end),
     {ok, Pid};
@@ -84,11 +82,9 @@ start_link(Cp, Source, Target, ChangesManager, MaxConns) ->
 init({Cp, Source, Target, ChangesManager, MaxConns}) ->
     process_flag(trap_exit, true),
     Parent = self(),
+    twig:log(error, "Replicator Worker Init Source ~p, Target ~p", [Source, Target]),
     LoopPid = spawn_link(fun() ->
-        twig:log(error, "Upgrading Httpdb"),
-        Src2 = couch_replicator_api_wrap:upgrade_httpdb(Source),
-        Trg2 = couch_replicator_api_wrap:upgrade_httpdb(Target),
-        queue_fetch_loop(Src2, Trg2, Parent, Cp, ChangesManager)
+        queue_fetch_loop(Source, Target, Parent, Cp, ChangesManager)
     end),
     erlang:put(last_stats_report, now()),
     State = #state{
@@ -216,7 +212,10 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
-queue_fetch_loop(Source, Target, Parent, Cp, ChangesManager) ->
+queue_fetch_loop(Source0, Target0, Parent, Cp, ChangesManager) ->
+    twig:log(error, "queue_fetch_loop before ugprade Source ~p Target ~p", [Source0, Target0]),
+    Source = couch_replicator_api_wrap:upgrade_httpdb(Source0),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     ChangesManager ! {get_changes, self()},
     receive
     {closed, ChangesManager} ->
@@ -287,20 +286,20 @@ remote_process_batch([{Id, Revs, PAs} | Rest], Parent) ->
 
 spawn_doc_reader(Source, Target, FetchParams) ->
     Parent = self(),
-    ModInfo0 = ?MODULE:module_info(),
-    twig:log(error, "Before Upgrade Httpdb spawn_doc_reader ~p", [ModInfo0]),
+    twig:log(error, "Before Spawn Doc Reader Source ~p Target ~p", [Source, Target]),
+    Src = couch_replicator_api_wrap:upgrade_httpdb(Source),
+    Tgt = couch_replicator_api_wrap:upgrade_httpdb(Target),
     spawn_link(fun() ->
-        ModInfo = ?MODULE:module_info(),
-        twig:log(notice, "After Upgrade Httpdb spawn_doc_reader~p", [ModInfo]),
-        Src = couch_replicator_api_wrap:upgrade_httpdb(Source),
         Source2 = open_db(Src),
         fetch_doc(
-            Source2, FetchParams, fun remote_doc_handler/2, {Parent, Target}),
+            Source2, FetchParams, fun remote_doc_handler/2, {Parent, Tgt}),
         close_db(Source2)
     end).
 
 
-fetch_doc(Source, {Id, Revs, PAs}, DocHandler, Acc) ->
+fetch_doc(Source0, {Id, Revs, PAs}, DocHandler, Acc) ->
+    twig:log(error, "fetch_doc before ugprade Source ~p", [Source0]),
+    Source = couch_replicator_api_wrap:upgrade_httpdb(Source0),
     try
         couch_replicator_api_wrap:open_doc_revs(
             Source, Id, Revs, [{atts_since, PAs}, latest], DocHandler, Acc)
@@ -344,13 +343,16 @@ local_doc_handler(_, Acc) ->
 remote_doc_handler({ok, #doc{atts = []} = Doc}, {Parent, _} = Acc) ->
     ok = gen_server:call(Parent, {batch_doc, Doc}, infinity),
     {ok, Acc};
-remote_doc_handler({ok, Doc}, {Parent, Target} = Acc) ->
+remote_doc_handler({ok, Doc}, {Parent, Target0} = Acc) ->
     % Immediately flush documents with attachments received from a remote
     % source. The data property of each attachment is a function that starts
     % streaming the attachment data from the remote source, therefore it's
     % convenient to call it ASAP to avoid ibrowse inactivity timeouts.
     Stats = couch_replicator_stats:new([{docs_read, 1}]),
     twig:log(debug,"Worker flushing doc with attachments", []),
+
+    twig:log(error, "remote_doc_handler before ugprade ~p", [Target0]),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     Target2 = open_db(Target),
     Success = (flush_doc(Target2, Doc) =:= ok),
     close_db(Target2),
@@ -376,13 +378,10 @@ spawn_writer(Target, #batch{docs = DocList, size = Size}) ->
         ok
     end,
     Parent = self(),
-    ModInfo0 = ?MODULE:module_info(),
-    twig:log(error, "Before Upgrade Httpdb spawn_writer ~p", [ModInfo0]),
+    twig:log(error, "Spawn Writer Before Upgrade Target ~p", [Target]),
+    Trg2 = couch_replicator_api_wrap:upgrade_httpdb(Target),
     spawn_link(
         fun() ->
-            ModInfo = ?MODULE:module_info(),
-            twig:log(error, "After Upgrade Httpdb spawn_writer ~p", [ModInfo]),
-            Trg2 = couch_replicator_api_wrap:upgrade_httpdb(Target),
             Target2 = open_db(Trg2),
             Stats = flush_docs(Target2, DocList),
             close_db(Target2),
@@ -403,9 +402,12 @@ after_full_flush(#state{stats = Stats, flush_waiter = Waiter} = State) ->
 
 maybe_flush_docs(Doc,State) ->
     #state{
-        target = Target, batch = Batch,
+        target = Target0, batch = Batch,
         stats = Stats, cp = Cp
     } = State,
+
+    twig:log(error, "Maybe_Flush_Docs Before Target0 ~p", [Target0]),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     {Batch2, WStats} = maybe_flush_docs(Target, Batch, Doc),
     Stats2 = couch_replicator_stats:sum_stats(Stats, WStats),
     Stats3 = couch_replicator_stats:increment(docs_read, Stats2),
@@ -463,7 +465,9 @@ batch_doc(#doc{atts = Atts}) ->
 flush_docs(_Target, []) ->
     couch_replicator_stats:new();
 
-flush_docs(Target, DocList) ->
+flush_docs(Target0, DocList) ->
+    twig:log(error, "Flush_Docs Before Target0 ~p", [Target0]),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     {ok, Errors} = couch_replicator_api_wrap:update_docs(
         Target, DocList, [delay_commit], replicated_changes),
     DbUri = couch_replicator_api_wrap:db_uri(Target),
@@ -479,7 +483,9 @@ flush_docs(Target, DocList) ->
         {doc_write_failures, length(Errors)}
     ]).
 
-flush_doc(Target, #doc{id = Id, revs = {Pos, [RevId | _]}} = Doc) ->
+flush_doc(Target0, #doc{id = Id, revs = {Pos, [RevId | _]}} = Doc) ->
+    twig:log(error, "Flush Doc Before Target0 ~p", [Target0]),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     try couch_replicator_api_wrap:update_doc(Target, Doc, [], replicated_changes) of
     {ok, _} ->
         ok;
@@ -505,7 +511,9 @@ flush_doc(Target, #doc{id = Id, revs = {Pos, [RevId | _]}} = Doc) ->
     end.
 
 
-find_missing(DocInfos, Target) ->
+find_missing(DocInfos, Target0) ->
+    twig:log(error, "find missing Before Target0 ~p", [Target0]),
+    Target = couch_replicator_api_wrap:upgrade_httpdb(Target0),
     {IdRevs, AllRevsCount} = lists:foldr(
         fun(#doc_info{id = Id, revs = RevsInfo}, {IdRevAcc, CountAcc}) ->
             Revs = [Rev || #rev_info{rev = Rev} <- RevsInfo],

@@ -529,8 +529,6 @@ maybe_start_replication(State, DbName, DocId, RepDoc) ->
         DelaySecs = StartDelaySecs + random:uniform(StartSplaySecs),
         twig:log(notice, "Delaying replication `~s` start by ~p seconds.",
             [pp_rep_id(RepId), DelaySecs]),
-        ModInfo0 = ?MODULE:module_info(),
-        twig:log(error, "Before Upgrade Httpdb starting ~p", [ModInfo0]),
         Pid = spawn_link(?MODULE, start_replication, [Rep, DelaySecs]),
         State#state{
             rep_start_pids = [{rep_start, Pid} | State#state.rep_start_pids]
@@ -572,15 +570,8 @@ maybe_tag_rep_doc(DbName, DocId, {RepProps}, RepId) ->
 
 %% note to self: this is markedly diff from mem3_rep_manager
 start_replication(Rep, Wait) ->
-    Src1 = Rep#rep.source,
-    Trg1 = Rep#rep.target,
-    ModInfo = ?MODULE:module_info(),
-    twig:log(error, "After spawn_link ModInfo ~p Rep Src ~p", [ModInfo, Src1]),
     ok = timer:sleep(Wait * 1000),
-    Src2 = couch_replicator_api_wrap:upgrade_httpdb(Src1),
-    Trg2 = couch_replicator_api_wrap:upgrade_httpdb(Trg1),
-    Rep2 = Rep#rep{source = Src2, target = Trg2},
-    case (catch couch_replicator:async_replicate(Rep2))of
+    case (catch couch_replicator:async_replicate(Rep))of
         {ok, _} ->
             ok;
         Error ->

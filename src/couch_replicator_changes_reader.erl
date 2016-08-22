@@ -37,6 +37,7 @@ start_link(StartSeq, Db, ChangesQueue, Options) ->
     end)}.
 
 read_changes(Parent, StartSeq, Db, ChangesQueue, Options, Ts) ->
+    twig:log(error, "Start of read_changes Db ~p", [Db]),
     Continuous = couch_util:get_value(continuous, Options),
     try
         couch_replicator_api_wrap:changes_since(Db, all_docs, StartSeq,
@@ -71,6 +72,7 @@ read_changes(Parent, StartSeq, Db, ChangesQueue, Options, Ts) ->
                     " with since=~p", [couch_replicator_api_wrap:db_uri(Db), LastSeq]),
                 Db
             end,
+            couch_replicator_api_wrap:upgrade_httpdb(Db2),
             ?MODULE:read_changes(Parent, LastSeq, Db2, ChangesQueue, Options, Ts);
         _ ->
             exit(Error)
