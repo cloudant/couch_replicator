@@ -269,15 +269,16 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
             Url = couch_util:url_strip_password(
                 couch_replicator_httpc:full_url(HttpDb, [{path,Path}, {qs,QS}])
             ),
-            #httpdb{retries = Retries, wait = Wait0} = HttpDb,
-            Wait = erlang:min(Wait0 * 2, ?MAX_WAIT),
+            HttpDb1 = couch_replicator_utils:maybe_upgrade_wait(HttpDb),
+            #httpdb{retries = Retries, wait = {NWait0, Boff}} = HttpDb1,
+            NWait = erlang:min(NWait0 * 2, ?MAX_WAIT),
             twig:log(notice,"Retrying GET to ~s in ~p seconds due to error ~w",
-                [Url, Wait / 1000, Else]
+                [Url, NWait / 1000, Else]
             ),
-            ok = timer:sleep(Wait),
-            RetryDb = HttpDb#httpdb{
+            ok = timer:sleep(NWait),
+            RetryDb = HttpDb1#httpdb{
                 retries = Retries - 1,
-                wait = Wait
+                wait = {NWait, Boff}
             },
             open_doc_revs(RetryDb, Id, Revs, Options, Fun, Acc)
     end;

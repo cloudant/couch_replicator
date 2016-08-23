@@ -59,17 +59,19 @@ read_changes(Parent, StartSeq, Db, ChangesQueue, Options, Ts) ->
         N when N > 0 ->
             put(retries_left, N - 1),
             LastSeq = get(last_seq),
+            Db1 = couch_replicator_utils:maybe_upgrade_wait(Db),
+            {NWait, Boff} = Db1#httpdb.wait,
             Db2 = case LastSeq of
             StartSeq ->
                 twig:log(notice,"Retrying _changes request to source database ~s"
                     " with since=~p in ~p seconds",
-                    [couch_replicator_api_wrap:db_uri(Db), LastSeq, Db#httpdb.wait / 1000]),
-                ok = timer:sleep(Db#httpdb.wait),
-                Db#httpdb{wait = 2 * Db#httpdb.wait};
+                    [couch_replicator_api_wrap:db_uri(Db1), LastSeq, NWait / 1000]),
+                ok = timer:sleep(NWait),
+                Db1#httpdb{wait = {2 * NWait, Boff}};
             _ ->
                 twig:log(notice,"Retrying _changes request to source database ~s"
-                    " with since=~p", [couch_replicator_api_wrap:db_uri(Db), LastSeq]),
-                Db
+                    " with since=~p", [couch_replicator_api_wrap:db_uri(Db1), LastSeq]),
+                Db1
             end,
             ?MODULE:read_changes(Parent, LastSeq, Db2, ChangesQueue, Options, Ts);
         _ ->
