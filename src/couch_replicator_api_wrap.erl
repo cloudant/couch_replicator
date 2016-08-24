@@ -49,7 +49,7 @@
     get_value/3
     ]).
 
--define(MAX_WAIT, 5 * 60 * 1000).
+-define(MAX_WAIT, 10 * 60 * 1000).
 
 db_uri(#httpdb{url = Url}) ->
     couch_util:url_strip_password(Url);
@@ -270,7 +270,7 @@ open_doc_revs(#httpdb{} = HttpDb, Id, Revs, Options, Fun, Acc) ->
                 couch_replicator_httpc:full_url(HttpDb, [{path,Path}, {qs,QS}])
             ),
             #httpdb{retries = Retries, wait = Wait0} = HttpDb,
-            Wait = 2 * erlang:min(Wait0 * 2, ?MAX_WAIT),
+            Wait = erlang:min(Wait0 * 2, ?MAX_WAIT),
             twig:log(notice,"Retrying GET to ~s in ~p seconds due to error ~w",
                 [Url, Wait / 1000, Else]
             ),
