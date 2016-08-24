@@ -249,11 +249,13 @@ discard_message(ReqId, Worker, Count) ->
 
 %% For 429 errors, we perform an exponential backoff up to 2.17 hours.
 %% We use Backoff time as a timeout/failure end.
-backoff(Worker, #httpdb{backoff = Backoff} = HttpDb, Params) ->
+backoff(Worker, HttpDb0, Params) ->
+    HttpDb = couch_replicator_utils:maybe_upgrade_wait(HttpDb0),
+    {NWait, Backoff} = HttpDb#httpdb.wait,
     ok = timer:sleep(random:uniform(Backoff)),
     Backoff2 = round(Backoff*?BACKOFF_EXP),
     NewBackoff = erlang:min(Backoff2, ?MAX_BACKOFF_WAIT),
-    NewHttpDb = HttpDb#httpdb{backoff = NewBackoff},
+    NewHttpDb = HttpDb#httpdb{wait = {NWait, NewBackoff}},
     case Backoff2 of
         W0 when W0 > ?MAX_BACKOFF_WAIT ->
             report_error(Worker, HttpDb, Params, {error,
@@ -268,12 +270,14 @@ backoff(Worker, #httpdb{backoff = Backoff} = HttpDb, Params) ->
 maybe_retry(Error, Worker, #httpdb{retries = 0} = HttpDb, Params) ->
     report_error(Worker, HttpDb, Params, {error, Error});
 
-maybe_retry(Error, _Worker, #httpdb{retries = Retries, wait = Wait} = HttpDb,
-    Params) ->
-    ok = timer:sleep(Wait),
-    log_retry_error(Params, HttpDb, Wait, Error),
-    Wait2 = erlang:min(Wait * 2, ?MAX_WAIT),
-    NewHttpDb = HttpDb#httpdb{retries = Retries - 1, wait = Wait2},
+maybe_retry(Error, _Worker, #httpdb{retries = Retries} = HttpDb0, Params) ->
+    HttpDb = couch_replicator_utils:maybe_upgrade_wait(HttpDb0),
+    {NWait, Backoff} = HttpDb#httpdb.wait,
+    ok = timer:sleep(NWait),
+    log_retry_error(Params, HttpDb, NWait, Error),
+    NWait2 = erlang:min(NWait * 2, ?MAX_WAIT),
+    NewHttpDb = HttpDb#httpdb{retries = Retries - 1,
+        wait = {NWait2, Backoff}},
     throw({retry, NewHttpDb, Params}).
 
 

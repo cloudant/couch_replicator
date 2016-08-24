@@ -18,6 +18,7 @@
 -export([replication_id/2]).
 -export([sum_stats/2, is_deleted/1]).
 -export([mp_parse_doc/2]).
+-export([maybe_upgrade_wait/1]).
 
 -export([handle_db_event/3]).
 
@@ -426,3 +427,9 @@ is_deleted(Change) ->
     Else ->
         Else
     end.
+
+% This is to support hot upgrades for 429 backoff
+maybe_upgrade_wait(#httpdb{wait = W} = HttpDb) when is_integer(W) ->
+    HttpDb#httpdb{wait = {W, 25}};
+maybe_upgrade_wait(HttpDb) ->
+    HttpDb.

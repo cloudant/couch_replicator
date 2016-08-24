@@ -22,10 +22,9 @@
     timeout,            % milliseconds
     ibrowse_options = [],
     retries = 10,
-    wait = 250,         % milliseconds
+    wait = {250, 25},  % {normal error wait time, 429 backoff wait time}
     httpc_pool = nil,
-    http_connections,
-    backoff = 25
+    http_connections
 }).
 
 -record(oauth, {
