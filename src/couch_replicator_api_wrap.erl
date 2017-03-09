@@ -422,6 +422,7 @@ changes_since(#httpdb{headers = Headers1, timeout = InactiveTimeout} = HttpDb,
         [{"feed", "continuous"}]
     end ++ [
         {"style", atom_to_list(Style)}, {"since", ?JSON_ENCODE(StartSeq)},
+        {"seq_interval", "50"},
         {"timeout", integer_to_list(Timeout)}
            ],
     DocIds = get_value(doc_ids, Options),

@@ -419,6 +419,8 @@ handle_call({add_stats, Stats}, From, State) ->
     NewStats = couch_replicator_utils:sum_stats(State#rep_state.stats, Stats),
     {noreply, State#rep_state{stats = NewStats}};
 
+handle_call({report_seq_done, undefined, _}, _From, State) ->
+    {reply, ok, State};
 handle_call({report_seq_done, Seq, StatsInc}, From,
     #rep_state{seqs_in_progress = SeqsInProgress, highest_seq_done = HighestDone,
         current_through_seq = ThroughSeq, stats = Stats} = State) ->
@@ -431,7 +433,11 @@ handle_call({report_seq_done, Seq, StatsInc}, From,
     [_ | _] ->
         {ThroughSeq, ordsets:del_element(Seq, SeqsInProgress)}
     end,
-    NewHighestDone = lists:max([HighestDone, Seq]),
+    %% TODO: grab latest seq rather than just skipping
+    NewHighestDone = case Seq of
+        {_, undefined} -> HighestDone;
+        _ -> lists:max([HighestDone, Seq])
+    end,
     NewThroughSeq = case NewSeqsInProgress of
     [] ->
         lists:max([NewThroughSeq0, NewHighestDone]);
@@ -481,6 +487,10 @@ handle_cast(checkpoint, State) ->
         {stop, shutdown, State}
     end;
 
+handle_cast({report_seq, {_, <<"null">>}}, State) ->
+    {noreply, State};
+handle_cast({report_seq, {_, null}}, State) ->
+    {noreply, State};
 handle_cast({report_seq, Seq},
     #rep_state{seqs_in_progress = SeqsInProgress} = State) ->
     NewSeqsInProgress = ordsets:add_element(Seq, SeqsInProgress),
@@ -660,13 +670,21 @@ changes_manager_loop_open(Parent, ChangesQueue, BatchSize, Ts) ->
         closed ->
             From ! {closed, self()};
         {ok, Changes} ->
-            #doc_info{high_seq = Seq} = lists:last(Changes),
+            Seq = last_change(lists:reverse(Changes)),
             ReportSeq = {Ts, Seq},
             ok = gen_server:cast(Parent, {report_seq, ReportSeq}),
             From ! {changes, self(), Changes, ReportSeq}
         end,
         changes_manager_loop_open(Parent, ChangesQueue, BatchSize, Ts + 1)
     end.
+
+
+last_change([]) ->
+    undefined;
+last_change([#doc_info{high_seq = null} | Rest]) ->
+    last_change(Rest);
+last_change([#doc_info{high_seq = Seq} | _]) ->
+    Seq.
 
 
 do_checkpoint(#rep_state{use_checkpoints=false} = State) ->
