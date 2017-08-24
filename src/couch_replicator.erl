@@ -654,7 +654,7 @@ maybe_save_migrated_log(Rep, Db, #doc{} = Doc, OldId) ->
         true ->
             update_checkpoint(Db, Doc),
             Msg = "Migrated replication checkpoint. Db:~p ~p -> ~p",
-            twig:log(error, Msg, [httpdb_strip_creds(Db), OldId, Doc#doc.id]);
+            twig:log(notice, Msg, [httpdb_strip_creds(Db), OldId, Doc#doc.id]);
         false ->
             ok
     end.
