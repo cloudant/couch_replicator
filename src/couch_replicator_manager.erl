@@ -37,6 +37,7 @@
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include("couch_replicator.hrl").
+-include("couch_replicator_api_wrap.hrl").
 
 -define(DOC_TO_REP, couch_rep_doc_id_to_rep_id).
 -define(REP_TO_STATE, couch_rep_id_to_rep_state).
@@ -508,7 +509,8 @@ rep_user_ctx({RepDoc}) ->
 
 
 maybe_start_replication(State, DbName, DocId, RepDoc) ->
-    #rep{id = {BaseId, _} = RepId} = Rep = parse_rep_doc(RepDoc),
+    Rep0  = parse_rep_doc(RepDoc),
+    #rep{id = {BaseId, _} = RepId} = Rep = possibly_hack(Rep0, DbName),
     case rep_state(RepId) of
     nil ->
         RepState = #rep_state{
@@ -822,4 +824,39 @@ is_replicator_db(Name) ->
             true;
         _ ->
             false
+    end.
+
+possibly_hack(Rep, DbName) ->
+    #rep{
+        source = Src,
+        target = Tgt
+    } = Rep,
+    Rep#rep{
+        source = fix_uri(DbName, Src),
+        target = fix_uri(DbName, Tgt)
+    }.
+
+fix_uri(_ReplicationDbName, #httpdb{} = Db) ->
+    Db;
+fix_uri(ReplicationDbName, DbName) ->
+    case customer_name(ReplicationDbName) of
+        undefined ->
+            DbName;
+        Customer ->
+            case customer_name(DbName) of
+                Customer ->
+                    DbName;
+                _ ->
+                    %% This is a clustered db case but we don't have user/pass
+                    %% so we cannot convert it to remote
+                    Msg = <<"only http based replication is supported">>,
+                    throw({forbidden, Msg})
+            end
+    end.
+
+customer_name(DbName) ->
+    case binary:split(DbName, <<"/">>, [global]) of
+        [Customer, _] -> Customer;
+        [<<"shards">>, _, Customer | _] -> Customer;
+        _ -> undefined
     end.
