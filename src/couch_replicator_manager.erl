@@ -37,6 +37,7 @@
 -include_lib("couch/include/couch_db.hrl").
 -include_lib("mem3/include/mem3.hrl").
 -include("couch_replicator.hrl").
+-include("couch_replicator_api_wrap.hrl").
 
 -define(DOC_TO_REP, couch_rep_doc_id_to_rep_id).
 -define(REP_TO_STATE, couch_rep_id_to_rep_state).
@@ -509,6 +510,7 @@ rep_user_ctx({RepDoc}) ->
 
 maybe_start_replication(State, DbName, DocId, RepDoc) ->
     #rep{id = {BaseId, _} = RepId} = Rep = parse_rep_doc(RepDoc),
+    ok = maybe_forbid_local_endpoints(Rep, DbName), % may throw {forbidden, _}
     case rep_state(RepId) of
     nil ->
         RepState = #rep_state{
@@ -823,3 +825,16 @@ is_replicator_db(Name) ->
         _ ->
             false
     end.
+
+% Allow replication to/from local nodes only from the local replicator db
+maybe_forbid_local_endpoints(_Rep, <<"_replicator">>) ->
+    ok;
+maybe_forbid_local_endpoints(#rep{source = Src, target = Tgt}, _DbName) ->
+    ok = check_endpoint_uri(Src),
+    ok = check_endpoint_uri(Tgt).
+
+check_endpoint_uri(#httpdb{}) ->
+    ok;
+check_endpoint_uri(_Db) ->
+    Msg = <<"only remote replication endpoints are supported">>,
+    throw({forbidden, Msg}).
