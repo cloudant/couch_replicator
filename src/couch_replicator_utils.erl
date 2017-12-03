@@ -451,7 +451,12 @@ maybe_upgrade_wait(HttpDb) ->
 % DBCore doesn't use that feature. Here it is read directly from config
 % setting and used only for forward compatibility
 get_couch_server_uuid() ->
-    config:get("couchdb", "uuid").
+    case config:get("couchdb", "uuid") of
+        UUID when is_list(UUID) ->
+            ?l2b(UUID);
+        undefined ->
+            undefined
+    end.
 
 
 get_v4_endpoint(UserCtx, #httpdb{} = HttpDb) ->
