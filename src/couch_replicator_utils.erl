@@ -43,6 +43,8 @@ parse_rep_doc({Props}, UserCtx) ->
     false ->
         Source = parse_rep_db(get_value(<<"source">>, Props), ProxyParams, Options),
         Target = parse_rep_db(get_value(<<"target">>, Props), ProxyParams, Options),
+        authorize_access_to_db(Source, UserCtx),
+        authorize_access_to_db(Target, UserCtx),
         Rep = #rep{
             source = Source,
             target = Target,
@@ -53,6 +55,16 @@ parse_rep_doc({Props}, UserCtx) ->
         {ok, Rep#rep{id = replication_id(Rep)}}
     end.
 
+authorize_access_to_db(#httpdb{}, _UseCtx) ->
+    ok;
+authorize_access_to_db(_Db, #user_ctx{roles = Roles} = C) ->
+    case config:get("replicator", "local_dbs", "allow") of
+        "allow" ->
+            ok;
+        "deny" ->
+            Msg = <<"replication of local dbs is not supported">>,
+            throw({forbidden, Msg})
+    end.
 
 replication_id(#rep{options = Options} = Rep) ->
     BaseId = replication_id(Rep, ?REP_ID_VERSION),
